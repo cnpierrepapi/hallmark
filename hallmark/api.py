@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,21 +37,32 @@ app = FastAPI(
 
 
 SHOWCASE_KEY = "showcase/current.json"
-_showcase_cache: dict[str, object] | None = None
+
+# Cached with a short life rather than for the process lifetime. A warm
+# instance would otherwise serve the same payload forever, so republishing
+# content would need a code deploy to show up.
+SHOWCASE_TTL_SECONDS = 60
+_showcase_cache: dict | None = None
+_showcase_fetched_at: float = 0.0
 
 
 def _showcase() -> dict:
-    """Read the published showcase payload, cached for the process lifetime.
+    """Read the published showcase payload.
 
     Built offline by scripts/publish_showcase.py, so this never touches the
     ledger or pyarrow and the deployed function stays small.
     """
-    global _showcase_cache
-    if _showcase_cache is None:
-        from hallmark import storage
+    global _showcase_cache, _showcase_fetched_at
 
-        body = storage.client().get_object(Bucket=storage.bucket(), Key=SHOWCASE_KEY)["Body"].read()
-        _showcase_cache = json.loads(body)
+    fresh = time.monotonic() - _showcase_fetched_at < SHOWCASE_TTL_SECONDS
+    if _showcase_cache is not None and fresh:
+        return _showcase_cache
+
+    from hallmark import storage
+
+    body = storage.client().get_object(Bucket=storage.bucket(), Key=SHOWCASE_KEY)["Body"].read()
+    _showcase_cache = json.loads(body)
+    _showcase_fetched_at = time.monotonic()
     return _showcase_cache
 
 
