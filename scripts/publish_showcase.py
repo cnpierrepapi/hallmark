@@ -36,6 +36,41 @@ SPECIMEN_FILES = {
 }
 
 
+THUMB_PX = 620
+
+
+def _publish_thumb(slug: str) -> str | None:
+    """Publish a small WebP for display only.
+
+    The tiles are 1024px PNGs of over a megabyte each, which is far too much
+    to load eight of on first paint. The thumbnail is for looking at; clicking
+    a tile still fetches the full stamped PNG, so what gets verified is the
+    real asset and not a resized copy that would fail its own check.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    source = ROOT / "out" / "gallery" / f"{slug}.png"
+    if not source.exists():
+        return None
+
+    with Image.open(source) as img:
+        img = img.convert("RGB")
+        img.thumbnail((THUMB_PX, THUMB_PX), Image.LANCZOS)
+        buffer = BytesIO()
+        img.save(buffer, "WEBP", quality=82, method=5)
+
+    key = f"showcase/thumbs/{slug}.webp"
+    storage.client().put_object(
+        Bucket=storage.bucket(),
+        Key=key,
+        Body=buffer.getvalue(),
+        ContentType="image/webp",
+    )
+    return key
+
+
 def main() -> int:
     load_dotenv(ROOT / ".env")
 
@@ -103,18 +138,20 @@ def main() -> int:
     gallery_json = ROOT / "out" / "gallery" / "gallery.json"
     if gallery_json.exists():
         record = json.loads(gallery_json.read_text(encoding="utf-8"))
-        gallery = [
-            {
-                "slug": t["slug"],
-                "title": t["title"],
-                "key": t["key"],
-                "model": t["model"],
-                "sha256": t["sha256"],
-                "size_bytes": t["size_bytes"],
-                "latency_seconds": t["latency_seconds"],
-            }
-            for t in record.get("tiles", [])
-        ]
+        for t in record.get("tiles", []):
+            thumb_key = _publish_thumb(t["slug"])
+            gallery.append(
+                {
+                    "slug": t["slug"],
+                    "title": t["title"],
+                    "key": t["key"],
+                    "thumb_key": thumb_key,
+                    "model": t["model"],
+                    "sha256": t["sha256"],
+                    "size_bytes": t["size_bytes"],
+                    "latency_seconds": t["latency_seconds"],
+                }
+            )
         print(f"  gallery   {len(gallery)} tiles")
 
     payload = {

@@ -106,11 +106,24 @@ def specimen(modality: str) -> StreamingResponse:
 
 @app.get("/api/gallery/{slug}")
 def gallery(slug: str) -> StreamingResponse:
-    """Stream a stamped gallery tile."""
+    """Stream the full stamped gallery tile. This is what gets verified."""
     entry = next((t for t in _showcase().get("gallery", []) if t["slug"] == slug), None)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"No gallery tile {slug}")
     return _stream(entry["key"], "image/png")
+
+
+@app.get("/api/thumb/{slug}")
+def thumb(slug: str) -> StreamingResponse:
+    """Stream a display-sized thumbnail.
+
+    Display only. A resized copy is not the stamped asset and would not
+    verify, which is why the tile click fetches the full PNG instead.
+    """
+    entry = next((t for t in _showcase().get("gallery", []) if t["slug"] == slug), None)
+    if entry is None or not entry.get("thumb_key"):
+        raise HTTPException(status_code=404, detail=f"No thumbnail for {slug}")
+    return _stream(entry["thumb_key"], "image/webp")
 
 
 @app.get("/health")

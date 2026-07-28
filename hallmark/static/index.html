@@ -588,8 +588,9 @@ async function boot() {
   const img = SHOW.specimens.find(s => s.modality === 'image');
 
   if (hero) {
+    // The demo alters and checks the full asset; the hero shows the thumbnail.
     HERO_SRC = `/api/gallery/${hero.slug}`;
-    el('heroImg').src = HERO_SRC;
+    el('heroImg').src = hero.thumb_key ? `/api/thumb/${hero.slug}` : HERO_SRC;
     el('heroCap').textContent = `${hero.title} · ${hero.model} · sha256 ${(hero.sha256 || '').slice(0, 32)}...`;
     attachBubbles(el('heroFig'), el('heroBubbles'), [
       { text: 'record found', ok: true },
@@ -672,9 +673,12 @@ function renderTiles(tiles) {
     tile.setAttribute('aria-label', `Check ${t.title} against its record`);
 
     const img = document.createElement('img');
-    img.src = `/api/gallery/${t.slug}`;
+    // Thumbnail for display. The click below fetches the full stamped PNG,
+    // because a resized copy is not the asset and would not verify.
+    img.src = t.thumb_key ? `/api/thumb/${t.slug}` : `/api/gallery/${t.slug}`;
     img.alt = t.title;
     img.loading = 'lazy';
+    img.decoding = 'async';
     tile.appendChild(img);
 
     const bubbles = document.createElement('div');
