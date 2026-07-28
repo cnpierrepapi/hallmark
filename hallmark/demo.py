@@ -335,10 +335,16 @@ You have NOT seen the images. You are given the reviewer's own stated reason for
 picking one, plus measured technical facts about each candidate. Write one short
 line per rejected candidate saying why it was not chosen.
 
-Ground every line in the reviewer's stated reason or in the measured facts.
-Never describe what an image looks like, never invent visual detail. If there is
-nothing distinguishing, say it was close and the reviewer preferred the other on
-their stated grounds.
+Rules:
+- Ground every line in the reviewer's stated reason or in the measured facts.
+- Never describe what an image looks like. Never invent visual detail.
+- Each line must be DIFFERENT from the others. Do not repeat one sentence
+  across candidates.
+- Where a candidate differs on a measured fact (score, a failed check, render
+  time, file size), lead with that fact and quote the number.
+- Where nothing separates it, say so plainly: it was close, and the reviewer
+  went the other way on their own grounds. Vary how you say it.
+- Keep each line under 18 words.
 
 Reply with JSON only: {"1": "line", "2": "line"} keyed by candidate index."""
 
