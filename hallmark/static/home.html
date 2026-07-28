@@ -24,7 +24,14 @@
     position: relative; border: 1px solid var(--rule); background: var(--deep);
     aspect-ratio: 1/1; overflow: hidden;
   }
-  .specimen .plate img { width: 100%; height: 100%; object-fit: cover; }
+  .specimen .plate img,
+  .specimen .plate video { width: 100%; height: 100%; object-fit: cover; }
+  .specimen .kind {
+    position: absolute; top: 10px; left: 10px; z-index: 2;
+    font-size: 9.5px; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--ink); background: rgba(12,11,10,.72); padding: 4px 9px;
+    border: 1px solid rgba(232,228,220,.18); backdrop-filter: blur(4px);
+  }
   .specimen .stampmark {
     position: absolute; right: -14px; bottom: 26px;
     background: var(--deep); border: 1px solid var(--pass); color: var(--pass);
@@ -49,8 +56,21 @@
     border: 1px solid var(--rule); background: var(--panel); cursor: pointer;
     overflow: hidden;
   }
-  .tile img { width: 100%; height: 100%; object-fit: cover; transition: transform .5s; }
+  .tile img, .tile video { width: 100%; height: 100%; object-fit: cover; transition: transform .5s; }
   .tile:hover img { transform: scale(1.06); }
+  .tile video { position: absolute; inset: 0; }
+  .tile.clip { width: 300px; }
+  .tile .badge {
+    position: absolute; top: 8px; left: 8px; z-index: 2;
+    font-size: 9px; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--ink); background: rgba(12,11,10,.7); padding: 3px 8px;
+    border: 1px solid rgba(232,228,220,.18);
+  }
+  .tile.clip .badge::before {
+    content: ""; display: inline-block; width: 0; height: 0; margin-right: 6px;
+    border-left: 5px solid var(--struck); border-top: 3.5px solid transparent;
+    border-bottom: 3.5px solid transparent; vertical-align: 1px;
+  }
   .tile .name {
     position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 9px;
     font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
@@ -188,7 +208,7 @@
       <p class="under">No account. Nothing pre-recorded. The demo generates real images and lets you break the proof yourself.</p>
     </div>
     <div class="specimen">
-      <div class="plate" id="plate"><img id="plateImg" alt="a signed asset from this pipeline"></div>
+      <div class="plate" id="plate"></div>
       <div class="stampmark" id="plateMark">verified</div>
       <p class="cap" id="plateCap">Loading a signed specimen.</p>
     </div>
@@ -200,7 +220,7 @@
   <div class="heading">
     <div>
       <p class="label">every one of these is a real signed file</p>
-      <p class="dim" style="margin-top:6px">Click any tile. It downloads the actual asset and runs it through the checker in front of you.</p>
+      <p class="dim" style="margin-top:6px">Stills and clips, generated for this page. Click any tile: it downloads the actual asset and runs it through the checker in front of you.</p>
     </div>
     <p class="faint" id="wallCount"></p>
   </div>
@@ -428,53 +448,115 @@ async function loadShowcase() {
   } catch (e) { return; }
 
   const tiles = SHOWCASE.gallery || [];
-  if (!tiles.length) return;
+  if (!tiles.length) {
+    // Better an honest empty state than a spinner that never resolves.
+    set('plateCap', 'The showcase is not reachable right now. The demo still runs.');
+    el('plateMark').classList.add('hidden');
+    el('wallOut').innerHTML = '<p class="faint">No published assets to show. Try the demo instead.</p>';
+    return;
+  }
 
-  // Hero specimen: the first tile, shown full size.
-  el('plateImg').src = '/api/thumb/' + tiles[0].slug;
-  el('plateImg').alt = tiles[0].title || 'a signed asset';
-  set('plateCap', `${tiles[0].title} · ${tiles[0].model} · sha ${(tiles[0].sha256 || '').slice(0, 12)}`);
-  attachBubbles(el('plate'), [
+  const isClip = t => t.kind === 'video';
+  const hero = tiles.find(t => t.hero) || tiles[0];
+
+  // Hero specimen. A clip plays straight away, muted, because a page about
+  // moving pictures that only shows stills is arguing against itself. The
+  // poster is the thumbnail, so first paint costs a few KB either way.
+  const plate = el('plate');
+  plate.innerHTML = '';
+  if (isClip(hero)) {
+    const video = document.createElement('video');
+    // The display copy, not the asset. The full stamped clip is 7MB and this
+    // one autoplays; the click below still fetches the real file to check.
+    video.src = '/api/clip/' + hero.slug;
+    video.poster = '/api/thumb/' + hero.slug;
+    video.muted = true; video.loop = true; video.autoplay = true;
+    video.playsInline = true; video.preload = 'metadata';
+    video.setAttribute('aria-label', hero.title || 'a signed clip');
+    plate.appendChild(video);
+    const kind = document.createElement('span');
+    kind.className = 'kind'; kind.textContent = 'clip';
+    plate.appendChild(kind);
+  } else {
+    const img = document.createElement('img');
+    img.src = '/api/thumb/' + hero.slug;
+    img.alt = hero.title || 'a signed asset';
+    plate.appendChild(img);
+  }
+  set('plateCap', `${hero.title} · ${hero.model} · sha ${(hero.sha256 || '').slice(0, 12)}`);
+  attachBubbles(plate, [
     { text: 'record found', ok: true },
     { text: 'prompt withheld' },
-    { text: `sha ${(tiles[0].sha256 || '').slice(0, 10)}` },
-    { text: `${tiles[0].model}` },
+    { text: `sha ${(hero.sha256 || '').slice(0, 10)}` },
+    { text: `${hero.model}` },
   ]);
 
-  set('wallCount', `${tiles.length} assets · every one verifiable`);
+  const clips = tiles.filter(isClip).length;
+  set('wallCount', `${tiles.length - clips} stills · ${clips} clips · every one verifiable`);
 
   const strip = el('strip');
   strip.innerHTML = '';
   tiles.forEach(t => {
     const node = document.createElement('div');
-    node.className = 'tile';
+    node.className = 'tile' + (isClip(t) ? ' clip' : '');
+
     const img = document.createElement('img');
     img.src = '/api/thumb/' + t.slug;
     img.alt = t.title || t.slug;
     img.loading = 'lazy';
+    node.appendChild(img);
+
+    if (isClip(t)) {
+      const badge = document.createElement('span');
+      badge.className = 'badge'; badge.textContent = 'clip';
+      node.appendChild(badge);
+      // The clip is only fetched once someone shows interest in it. A wall
+      // that loads every clip up front would cost megabytes before a visitor
+      // has done anything at all.
+      attachClip(node, t);
+    }
+
     const name = document.createElement('span');
     name.className = 'name'; name.textContent = t.title || t.slug;
-    node.appendChild(img); node.appendChild(name);
+    node.appendChild(name);
+
     node.addEventListener('click', () => checkTile(node, t));
     attachBubbles(node, [
       { text: 'signed', ok: true },
       { text: `sha ${(t.sha256 || '').slice(0, 10)}` },
-      { text: 'click to check' },
+      { text: isClip(t) ? 'hover to play, click to check' : 'click to check' },
     ]);
     strip.appendChild(node);
   });
+}
+
+function attachClip(node, tile) {
+  let video = null;
+  node.addEventListener('mouseenter', () => {
+    if (!video) {
+      video = document.createElement('video');
+      video.src = '/api/clip/' + tile.slug;
+      video.poster = '/api/thumb/' + tile.slug;
+      video.muted = true; video.loop = true; video.playsInline = true;
+      video.preload = 'none';
+      node.insertBefore(video, node.firstChild.nextSibling);
+    }
+    video.play().catch(() => { /* a blocked autoplay leaves the poster up */ });
+  });
+  node.addEventListener('mouseleave', () => { if (video) video.pause(); });
 }
 
 async function checkTile(node, tile) {
   const out = el('wallOut');
   document.querySelectorAll('.tile').forEach(n => n.classList.remove('checking', 'done'));
   node.classList.add('checking');
-  out.innerHTML = `<p class="dim">Fetching ${tile.title} and checking it. This is the full stamped file, not the thumbnail.</p>`;
+  const clip = tile.kind === 'video';
+  out.innerHTML = `<p class="dim">Fetching ${tile.title} and checking it. This is the full stamped ${clip ? 'clip' : 'file'}, not the poster.</p>`;
 
   try {
     const bytes = await (await fetch('/api/gallery/' + tile.slug)).blob();
     const body = new FormData();
-    body.append('file', bytes, tile.slug + '.png');
+    body.append('file', bytes, tile.slug + (clip ? '.mp4' : '.png'));
     const d = await (await fetch('/api/verify', { method: 'POST', body })).json();
     node.classList.remove('checking');
     node.classList.add('done');

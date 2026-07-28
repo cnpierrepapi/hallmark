@@ -107,11 +107,30 @@ def specimen(modality: str) -> StreamingResponse:
 
 @app.get("/api/gallery/{slug}")
 def gallery(slug: str) -> StreamingResponse:
-    """Stream the full stamped gallery tile. This is what gets verified."""
+    """Stream the full stamped gallery tile. This is what gets verified.
+
+    A clip and a still are both real assets here, so the media type comes from
+    the record rather than being assumed.
+    """
     entry = next((t for t in _showcase().get("gallery", []) if t["slug"] == slug), None)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"No gallery tile {slug}")
-    return _stream(entry["key"], "image/png")
+    return _stream(entry["key"], entry.get("media_type", "image/png"))
+
+
+@app.get("/api/clip/{slug}")
+def clip(slug: str) -> StreamingResponse:
+    """Stream a display copy of a clip.
+
+    Playback only. The generated clips are 1080p at up to 29 Mbps, so the tile
+    plays a re-encoded copy while the click still fetches the full stamped
+    file. A re-encoded copy is not the asset and would fail its own check,
+    which is exactly why it is never what gets verified.
+    """
+    entry = next((t for t in _showcase().get("gallery", []) if t["slug"] == slug), None)
+    if entry is None or not entry.get("display_key"):
+        raise HTTPException(status_code=404, detail=f"No display clip for {slug}")
+    return _stream(entry["display_key"], "video/mp4")
 
 
 @app.get("/api/thumb/{slug}")

@@ -7,3 +7,7 @@ pytest==8.4.2
 pillow==11.3.0
 httpx==0.28.1
 uvicorn[standard]==0.41.0
+
+# Poster frames for the video tiles, pulled locally by publish_showcase.
+# Ships an ffmpeg binary, so it stays out of the deployed function.
+imageio-ffmpeg==0.6.0

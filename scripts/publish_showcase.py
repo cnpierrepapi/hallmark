@@ -39,23 +39,131 @@ SPECIMEN_FILES = {
 THUMB_PX = 620
 
 
-def _publish_thumb(slug: str) -> str | None:
+def _poster_frame(source: Path) -> bytes | None:
+    """Pull the first frame out of a clip, as PNG bytes.
+
+    A wall of clips that all start loading on first paint would be several
+    megabytes before a visitor has done anything, so the tiles show a poster
+    and only fetch the clip when it is actually played. Extraction runs here,
+    locally, with an ffmpeg binary that never goes anywhere near the deployed
+    function.
+    """
+    import subprocess
+
+    try:
+        import imageio_ffmpeg
+    except ImportError:
+        print("    imageio-ffmpeg is not installed, so clips get no poster frame")
+        return None
+
+    done = subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-v", "error",
+            "-i", str(source),
+            "-frames:v", "1",
+            "-f", "image2pipe", "-vcodec", "png", "-",
+        ],
+        capture_output=True,
+    )
+    if done.returncode != 0 or not done.stdout:
+        print(f"    could not read a frame from {source.name}: {done.stderr[:160]!r}")
+        return None
+    return done.stdout
+
+
+DISPLAY_HEIGHT = 540
+DISPLAY_CRF = "31"
+
+
+def _publish_display_clip(slug: str) -> str | None:
+    """Publish a web-weight copy of a clip, for playing only.
+
+    The generated clips come back 1080p30 at 11 to 29 Mbps, which is 7 to 18MB
+    for five seconds. A wall of those is not a web page. This is the same
+    bargain the thumbnails already make: the tile plays a display copy, and
+    clicking it still fetches the full stamped file, because a re-encoded copy
+    is not the asset and would rightly fail its own check.
+
+    Audio is dropped. These are silent product clips and the track is a
+    128kbps stereo AAC of nothing.
+    """
+    import subprocess
+    import tempfile
+
+    try:
+        import imageio_ffmpeg
+    except ImportError:
+        print("    imageio-ffmpeg is not installed, so clips get no display copy")
+        return None
+
+    source = ROOT / "out" / "gallery" / f"{slug}.mp4"
+    if not source.exists():
+        return None
+
+    with tempfile.TemporaryDirectory(prefix="hallmark-display-") as tmp:
+        out = Path(tmp) / f"{slug}.mp4"
+        done = subprocess.run(
+            [
+                imageio_ffmpeg.get_ffmpeg_exe(),
+                "-v", "error", "-y",
+                "-i", str(source),
+                "-vf", f"scale=-2:{DISPLAY_HEIGHT}",
+                "-c:v", "libx264", "-crf", DISPLAY_CRF, "-preset", "slow",
+                "-pix_fmt", "yuv420p",
+                "-an",
+                "-movflags", "+faststart",
+                str(out),
+            ],
+            capture_output=True,
+        )
+        if done.returncode != 0 or not out.exists():
+            print(f"    could not transcode {slug}: {done.stderr[:200]!r}")
+            return None
+
+        body = out.read_bytes()
+        shrink = source.stat().st_size / len(body)
+        print(f"    display   {slug:24} {len(body) / 1024:7.0f}KB  {shrink:4.1f}x smaller")
+
+    key = f"showcase/display/{slug}.mp4"
+    storage.client().put_object(
+        Bucket=storage.bucket(), Key=key, Body=body, ContentType="video/mp4"
+    )
+    return key
+
+
+def _publish_thumb(slug: str, kind: str = "image") -> str | None:
     """Publish a small WebP for display only.
 
-    The tiles are 1024px PNGs of over a megabyte each, which is far too much
-    to load eight of on first paint. The thumbnail is for looking at; clicking
-    a tile still fetches the full stamped PNG, so what gets verified is the
+    The tiles are 1024px assets of over a megabyte each, which is far too much
+    to load a wall of on first paint. The thumbnail is for looking at; clicking
+    a tile still fetches the full stamped file, so what gets verified is the
     real asset and not a resized copy that would fail its own check.
+
+    For a clip this is the poster frame, and it does the same job twice: it is
+    what the tile shows before playback, and what it falls back to if the
+    visitor never hovers.
     """
     from io import BytesIO
 
     from PIL import Image
 
-    source = ROOT / "out" / "gallery" / f"{slug}.png"
-    if not source.exists():
-        return None
+    folder = ROOT / "out" / "gallery"
+    if kind == "video":
+        source = folder / f"{slug}.mp4"
+        if not source.exists():
+            return None
+        frame = _poster_frame(source)
+        if frame is None:
+            return None
+        handle = BytesIO(frame)
+    else:
+        source = folder / f"{slug}.png"
+        if not source.exists():
+            return None
+        handle = source
 
-    with Image.open(source) as img:
+    with Image.open(handle) as img:
         img = img.convert("RGB")
         img.thumbnail((THUMB_PX, THUMB_PX), Image.LANCZOS)
         buffer = BytesIO()
@@ -139,20 +247,28 @@ def main() -> int:
     if gallery_json.exists():
         record = json.loads(gallery_json.read_text(encoding="utf-8"))
         for t in record.get("tiles", []):
-            thumb_key = _publish_thumb(t["slug"])
+            kind = t.get("kind", "image")
+            thumb_key = _publish_thumb(t["slug"], kind)
+            display_key = _publish_display_clip(t["slug"]) if kind == "video" else None
             gallery.append(
                 {
                     "slug": t["slug"],
                     "title": t["title"],
                     "key": t["key"],
+                    "kind": kind,
+                    "media_type": t.get("media_type", "image/png"),
+                    "hero": bool(t.get("hero")),
                     "thumb_key": thumb_key,
+                    "display_key": display_key,
                     "model": t["model"],
                     "sha256": t["sha256"],
                     "size_bytes": t["size_bytes"],
                     "latency_seconds": t["latency_seconds"],
                 }
             )
-        print(f"  gallery   {len(gallery)} tiles")
+        stills = sum(1 for t in gallery if t["kind"] == "image")
+        clips = sum(1 for t in gallery if t["kind"] == "video")
+        print(f"  gallery   {len(gallery)} tiles: {stills} stills, {clips} clips")
 
     payload = {
         "run_id": run_id,
