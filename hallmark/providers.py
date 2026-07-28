@@ -69,8 +69,8 @@ def tts_registry() -> ModelRegistry:
     return registry
 
 
-def image_provider() -> GMICloudImageProvider:
-    return GMICloudImageProvider(http_timeout=SUBMIT_TIMEOUT)
+def image_provider(http_timeout: float = SUBMIT_TIMEOUT) -> GMICloudImageProvider:
+    return GMICloudImageProvider(http_timeout=http_timeout)
 
 
 def video_provider() -> GMICloudVideoProvider:

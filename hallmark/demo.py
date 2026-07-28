@@ -37,6 +37,11 @@ QUOTA_PREFIX = "quota"
 DAILY_GENERATION_CAP = 12
 PER_SESSION_CAP = 3
 
+# Short, because the function itself dies at 60 seconds. A submit that has not
+# answered by now is one GMI is holding open, and those are recovered from the
+# queue listing rather than treated as failures.
+SUBMIT_TIMEOUT = 18.0
+
 STYLE_HINT = (
     "3D character render, glossy and colourful, dramatic studio lighting, "
     "dark seamless background, high detail"
@@ -51,6 +56,7 @@ class QuotaExceeded(Exception):
 class Candidate:
     index: int
     job_id: str
+    seed: int = 0
     status: str = "queued"
     url: str | None = None
     sha256: str | None = None
@@ -152,15 +158,51 @@ def quota_status(session_id: str | None = None) -> dict:
     }
 
 
-def _build_step(prompt: str) -> Step:
-    return Step(
-        step_type=StepType.GENERATE,
-        modality=Modality.IMAGE,
-        provider="gmicloud-image",
-        model=None,  # filled by the caller
-        prompt=prompt,
-        prompt_visibility=PromptVisibility.PRIVATE,
-    )
+def _recover_unresolved(candidates: list[Candidate]) -> None:
+    """Find job ids for submits whose response never came back.
+
+    GMI sometimes holds the connection on POST /requests until the render
+    finishes rather than returning a job id. The work still runs and still
+    bills, so treating a client timeout as a failure would throw away
+    something already paid for.
+
+    Every candidate carries a unique seed and GMI echoes the payload on the
+    queue listing, so an unresolved submit can be matched back to its job.
+    """
+    import os
+
+    import httpx
+
+    missing = [c for c in candidates if c.status == "unresolved"]
+    if not missing:
+        return
+
+    try:
+        with httpx.Client(
+            base_url="https://console.gmicloud.ai/api/v1/ie/requestqueue/apikey",
+            headers={"Authorization": f"Bearer {os.environ['GMI_API_KEY']}"},
+            timeout=20.0,
+        ) as client:
+            body = client.get("/requests").json()
+    except Exception:  # noqa: BLE001 - recovery is best effort
+        return
+
+    rows = body if isinstance(body, list) else body.get("requests") or body.get("data") or []
+    by_seed = {}
+    for row in rows:
+        seed = (row.get("payload") or {}).get("seed")
+        job_id = row.get("request_id") or row.get("id")
+        if seed is not None and job_id:
+            by_seed[int(seed)] = str(job_id)
+
+    for candidate in missing:
+        job_id = by_seed.get(candidate.seed)
+        if job_id:
+            candidate.job_id = job_id
+            candidate.status = "queued"
+            candidate.reason = None
+        else:
+            candidate.status = "failed"
 
 
 def start_generation(brief: str, session_id: str | None = None) -> dict:
@@ -177,9 +219,14 @@ def start_generation(brief: str, session_id: str | None = None) -> dict:
         )
 
     prompt = f"{brief.strip()}. {STYLE_HINT}"
-    provider = image_provider()
+    provider = image_provider(http_timeout=SUBMIT_TIMEOUT)
+    batch = int(time.time())
 
     def submit(index: int) -> Candidate:
+        # Same prompt, different seed. The seed doubles as a marker: GMI
+        # echoes the payload back on the queue listing, so a submit whose
+        # response never arrives can still be matched to its job.
+        seed = batch * 100 + index
         step = Step(
             step_type=StepType.GENERATE,
             modality=Modality.IMAGE,
@@ -187,16 +234,21 @@ def start_generation(brief: str, session_id: str | None = None) -> dict:
             model=IMAGE_MODEL,
             prompt=prompt,
             prompt_visibility=PromptVisibility.PRIVATE,
-            # Same prompt, different seed: the point of the gate is that the
-            # same instruction does not produce the same quality twice.
-            seed=index * 7919 + int(time.time()) % 1000,
+            seed=seed,
         )
-        job_id = provider.submit(step)
-        return Candidate(index=index, job_id=str(job_id))
+        try:
+            job_id = provider.submit(step)
+            return Candidate(index=index, job_id=str(job_id), seed=seed)
+        except Exception as exc:  # noqa: BLE001 - recovered below, not lost
+            return Candidate(
+                index=index, job_id="", seed=seed, status="unresolved",
+                reason=str(exc)[:160],
+            )
 
     with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
         candidates = list(pool.map(submit, range(CANDIDATES)))
 
+    _recover_unresolved(candidates)
     _bump_quota(session_id)
 
     session = {
