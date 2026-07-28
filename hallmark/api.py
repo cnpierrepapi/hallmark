@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from hallmark.verify import verify
 
@@ -75,7 +75,7 @@ def showcase() -> JSONResponse:
         return JSONResponse({"error": str(exc), "specimens": [], "attempts": []}, status_code=503)
 
 
-def _stream(key: str, media_type: str) -> StreamingResponse:
+def _stream(key: str, media_type: str, download: bool = False) -> StreamingResponse:
     """Proxy an object out of the private bucket.
 
     Proxied rather than linked, because the bucket stays private and the point
@@ -85,11 +85,12 @@ def _stream(key: str, media_type: str) -> StreamingResponse:
     from hallmark import storage
 
     obj = storage.client().get_object(Bucket=storage.bucket(), Key=key)
+    disposition = "attachment" if download else "inline"
     return StreamingResponse(
         obj["Body"].iter_chunks(CHUNK_BYTES),
         media_type=media_type,
         headers={
-            "Content-Disposition": f'inline; filename="{Path(key).name}"',
+            "Content-Disposition": f'{disposition}; filename="{Path(key).name}"',
             "Cache-Control": "public, max-age=3600",
         },
     )
@@ -138,7 +139,9 @@ def demo_generate(payload: dict) -> JSONResponse:
         raise HTTPException(status_code=400, detail="Keep the brief under 300 characters")
 
     try:
-        session = demo.start_generation(brief, payload.get("session_id"))
+        session = demo.start_generation(
+            brief, payload.get("session_id"), payload.get("style")
+        )
     except demo.QuotaExceeded as exc:
         # Not an error state for the page: it falls back to replaying a
         # recorded run so the demo still works once the budget is spent.
@@ -178,7 +181,11 @@ def demo_select(payload: dict) -> JSONResponse:
     with tempfile.TemporaryDirectory(prefix="hallmark-demo-") as tmp:
         try:
             session = demo.select_candidate(
-                session_id, picked, (payload.get("reason") or "")[:400], Path(tmp)
+                session_id,
+                picked,
+                (payload.get("reason") or "")[:400],
+                Path(tmp),
+                signer=(payload.get("signer") or "Visitor")[:60],
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="No such session") from None
@@ -189,8 +196,13 @@ def demo_select(payload: dict) -> JSONResponse:
 
 
 @app.get("/api/demo/asset/{session_id}/{name}")
-def demo_asset(session_id: str, name: str) -> StreamingResponse:
-    """Stream a stored candidate out of the private bucket."""
+def demo_asset(session_id: str, name: str, download: int = 0) -> StreamingResponse:
+    """Stream a stored candidate out of the private bucket.
+
+    ``download=1`` sends it as an attachment, which is the case that matters:
+    the signature is written into the file, so it has to survive being saved
+    to a desktop and opened in a file browser.
+    """
     from hallmark import demo
 
     session = demo.load_session(session_id)
@@ -203,7 +215,15 @@ def demo_asset(session_id: str, name: str) -> StreamingResponse:
     )
     if entry is None:
         raise HTTPException(status_code=404, detail="No such asset")
-    return _stream(entry["stored_key"], "image/png")
+    return _stream(entry["stored_key"], entry.get("media_type") or "image/png", bool(download))
+
+
+@app.get("/api/demo/styles")
+def demo_styles() -> dict:
+    """The style presets the page offers."""
+    from hallmark import demo
+
+    return {"styles": demo.style_choices(), "default": demo.DEFAULT_STYLE}
 
 
 @app.get("/api/demo/quota")
@@ -222,6 +242,8 @@ def _session_public(session: dict) -> dict:
     return {
         "session_id": session["session_id"],
         "brief": session["brief"],
+        "style": session.get("style"),
+        "style_label": session.get("style_label"),
         "model": session["model"],
         "status": session["status"],
         "created_at": session["created_at"],
@@ -241,8 +263,15 @@ def _session_public(session: dict) -> dict:
                 "checks": c.get("checks") or [],
                 "accepted": c.get("accepted", False),
                 "reason": c.get("reason"),
+                "media_type": c.get("media_type", "image/png"),
                 "asset": (
                     f"/api/demo/asset/{session['session_id']}/{Path(c['stored_key']).name}"
+                    if c.get("stored_key")
+                    else None
+                ),
+                "download": (
+                    f"/api/demo/asset/{session['session_id']}"
+                    f"/{Path(c['stored_key']).name}?download=1"
                     if c.get("stored_key")
                     else None
                 ),
@@ -260,9 +289,44 @@ def health() -> dict[str, str]:
     return {"status": "ok", "storage": "configured" if configured else "unconfigured"}
 
 
+@app.get("/hallmark.css")
+def stylesheet() -> Response:
+    """The surface both pages share, so they read as one document."""
+    return Response(
+        (STATIC_DIR / "hallmark.css").read_text(encoding="utf-8"),
+        media_type="text/css",
+        headers={"Cache-Control": "public, max-age=600"},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    """What the product is and who it is for."""
+    return HTMLResponse((STATIC_DIR / "home.html").read_text(encoding="utf-8"))
+
+
+@app.get("/demo", response_class=HTMLResponse)
+def demo_page() -> HTMLResponse:
+    """The loop a visitor performs: generate, pick, prove, edit, disprove, keep."""
+    return HTMLResponse((STATIC_DIR / "demo.html").read_text(encoding="utf-8"))
+
+
+def _visible_metadata(path: Path, media_type: str) -> dict[str, str]:
+    """What a file browser would show for this file.
+
+    Read out of the uploaded bytes rather than looked up anywhere, so the page
+    can show the same thing the visitor's own machine will show once they save
+    the file. An image with nothing written into it returns nothing, which is
+    the honest answer for most of what gets checked here.
+    """
+    if not media_type.startswith("image/"):
+        return {}
+    try:
+        from hallmark import metadata
+
+        return metadata.read_visible(path)
+    except Exception:  # noqa: BLE001 - a verdict must not hinge on metadata
+        return {}
 
 
 @app.post("/api/verify")
@@ -293,6 +357,7 @@ async def api_verify(file: UploadFile = File(...)) -> JSONResponse:
         payload = result.to_dict()
         payload["filename"] = file.filename
         payload["size_bytes"] = written
+        payload["visible"] = _visible_metadata(tmp_path, result.media_type)
         return JSONResponse(payload)
     finally:
         tmp_path.unlink(missing_ok=True)

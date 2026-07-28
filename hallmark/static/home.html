@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HALLMARK / ship the ad, ship the proof</title>
+<meta name="description" content="Generate advertising assets that carry their own record: what made them, who approved them, and whether a single byte has moved since. The prompt stays yours.">
+<link rel="stylesheet" href="/hallmark.css">
+<style>
+  /* ---- hero: 58/42, specimen bleeding off the right edge -------------- */
+  .hero {
+    display: grid; grid-template-columns: minmax(0, 58fr) minmax(0, 42fr);
+    gap: 5vw; align-items: center;
+    padding: 9vh 0 7vh;
+  }
+  .hero h1 { font-size: clamp(46px, 8.4vw, 104px); margin: 14px 0 0; }
+  .hero h1 .line2 { display: block; color: var(--struck); }
+  .hero .stand { color: var(--dim); max-width: 44ch; font-size: 15px; margin: 22px 0 0; }
+  .hero .acts { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .hero .under { margin-top: 20px; font-size: 12px; color: var(--faint); }
+
+  .specimen { position: relative; }
+  .specimen .plate {
+    position: relative; border: 1px solid var(--rule); background: var(--deep);
+    aspect-ratio: 1/1; overflow: hidden;
+  }
+  .specimen .plate img { width: 100%; height: 100%; object-fit: cover; }
+  .specimen .stampmark {
+    position: absolute; right: -14px; bottom: 26px;
+    background: var(--deep); border: 1px solid var(--pass); color: var(--pass);
+    font-size: 10px; letter-spacing: .26em; text-transform: uppercase;
+    padding: 9px 16px;
+  }
+  .specimen .cap { margin-top: 12px; font-size: 11.5px; color: var(--faint); }
+
+  /* ---- full bleed wall ------------------------------------------------ */
+  .wall {
+    border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+    background: var(--deep); padding: 26px 0 30px;
+  }
+  .wall .heading { padding: 0 5vw 18px; display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; align-items: baseline; }
+  .wall .heading p { margin: 0; }
+  .strip {
+    display: flex; gap: 10px; overflow-x: auto; padding: 0 5vw 10px;
+    scrollbar-width: thin;
+  }
+  .tile {
+    flex: 0 0 auto; width: 208px; height: 208px; position: relative;
+    border: 1px solid var(--rule); background: var(--panel); cursor: pointer;
+    overflow: hidden;
+  }
+  .tile img { width: 100%; height: 100%; object-fit: cover; transition: transform .5s; }
+  .tile:hover img { transform: scale(1.06); }
+  .tile .name {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 9px;
+    font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    background: linear-gradient(transparent, rgba(12,11,10,.9)); color: var(--dim);
+  }
+  .tile.checking { border-color: var(--struck); }
+  .tile.done { border-color: var(--pass); }
+  .tile .bubbles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .bubble {
+    position: absolute; display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border-radius: 999px; font-size: 10px; white-space: nowrap;
+    color: var(--ink); background: rgba(18,17,16,.8);
+    border: 1px solid rgba(232,228,220,.2); backdrop-filter: blur(6px);
+    opacity: 0; animation: rise 2.4s cubic-bezier(.22,.7,.3,1) forwards;
+  }
+  .bubble .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--struck); box-shadow: 0 0 7px var(--struck); }
+  .bubble.ok { border-color: rgba(127,176,105,.5); }
+  .bubble.ok .dot { background: var(--pass); box-shadow: 0 0 7px var(--pass); }
+  @keyframes rise {
+    0% { opacity: 0; transform: translate3d(0,20px,0) scale(.86); }
+    18% { opacity: 1; transform: translate3d(0,3px,0) scale(1); }
+    70% { opacity: 1; }
+    100% { opacity: 0; transform: translate3d(var(--drift,6px),-58px,0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bubble { animation: fade 2.4s linear forwards; }
+    @keyframes fade { 0%,100% { opacity: 0 } 20%,70% { opacity: 1 } }
+  }
+  .wallout { padding: 18px 5vw 0; min-height: 2.4em; }
+
+  /* ---- use cases: offset list, alternating indent --------------------- */
+  .uses { padding: 10vh 0 8vh; }
+  .use { border-top: 1px solid var(--rule); padding: 30px 0 26px; }
+  .use:nth-child(even) { padding-left: 12%; }
+  .use .n {
+    font-family: var(--display); font-size: 34px; color: var(--faint);
+    line-height: 1; float: left; width: 74px;
+  }
+  .use .body { overflow: hidden; }
+  .use h3 {
+    font-family: var(--display); font-weight: 400; letter-spacing: -.02em;
+    font-size: clamp(21px, 2.9vw, 31px); margin: 0 0 8px; line-height: 1.08;
+  }
+  .use p { margin: 0; color: var(--dim); max-width: 62ch; }
+  .use .today { margin-top: 10px; color: var(--faint); font-size: 12.5px; }
+  .use .today b { color: var(--warn); font-weight: 400; }
+
+  /* ---- properties panel ----------------------------------------------- */
+  .props { border-top: 1px solid var(--rule); padding: 9vh 0; }
+  .propsgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 460px); gap: 6vw; align-items: start; margin-top: 26px; }
+  .dialog {
+    background: var(--panel); border: 1px solid var(--rule);
+    box-shadow: 0 24px 60px rgba(0,0,0,.55);
+  }
+  .dialog .bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 9px 13px; border-bottom: 1px solid var(--rule); background: var(--deep);
+    font-size: 11px; color: var(--dim);
+  }
+  .dialog .tabs { display: flex; gap: 16px; padding: 10px 13px 0; font-size: 11px; color: var(--faint); }
+  .dialog .tabs .on { color: var(--ink); border-bottom: 2px solid var(--struck); padding-bottom: 6px; }
+  .dialog dl { margin: 0; padding: 12px 13px 16px; }
+  .dialog .prow { display: grid; grid-template-columns: 108px 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--rule-soft); }
+  .dialog dt { color: var(--faint); font-size: 11px; }
+  .dialog dd { margin: 0; font-size: 11.5px; color: var(--ink); }
+  .dialog dd.gold { color: var(--struck-lit); }
+
+  /* ---- tamper band ---------------------------------------------------- */
+  .band { background: var(--deep); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 9vh 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 4vw; margin-top: 30px; }
+  .two .side h4 {
+    margin: 0; font-size: clamp(28px, 5vw, 58px); letter-spacing: .12em;
+    text-transform: uppercase; font-weight: 600; font-family: var(--mono);
+  }
+  .two .pass h4 { color: var(--pass); }
+  .two .fail h4 { color: var(--fail); }
+  .two .side p { color: var(--dim); margin: 10px 0 0; max-width: 42ch; }
+  .two .side .hash { margin-top: 14px; font-size: 11.5px; color: var(--faint); word-break: break-all; }
+
+  /* ---- check any file -------------------------------------------------- */
+  .check { padding: 9vh 0; }
+  .drop {
+    border: 1px dashed var(--faint); padding: 40px 30px; margin-top: 24px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .drop:hover, .drop.over { border-color: var(--struck); background: rgba(201,162,39,.05); }
+  .drop p { margin: 0; color: var(--dim); }
+  .checkout { margin-top: 22px; }
+
+  /* ---- closing CTA ---------------------------------------------------- */
+  .close {
+    border-top: 1px solid var(--rule);
+    background:
+      radial-gradient(120% 140% at 80% 0%, rgba(201,162,39,.10), transparent 60%),
+      var(--bg);
+    padding: 11vh 0 10vh;
+  }
+  .close h2 { font-size: clamp(34px, 6vw, 72px); margin: 12px 0 0; }
+  .close .acts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; gap: 34px; padding: 6vh 0 5vh; }
+    .propsgrid, .two { grid-template-columns: 1fr; gap: 32px; }
+    .use:nth-child(even) { padding-left: 0; }
+    .use .n { float: none; width: auto; margin-bottom: 6px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <a class="wordmark" href="/">Hallmark</a>
+  <nav class="mastnav">
+    <a href="/demo">The demo</a>
+    <a href="#check">Check a file</a>
+    <a href="/health">Status</a>
+  </nav>
+</div>
+
+<!-- HERO -->
+<div class="wrap">
+  <section class="hero">
+    <div>
+      <p class="label">provenance for generated advertising</p>
+      <h1 class="display">Ship the ad.<span class="line2">Ship the proof.</span></h1>
+      <p class="stand">
+        Every asset leaves with a record of what made it, who signed it off, and whether a
+        single byte has moved since. Open the file properties and the signature is right
+        there. Your prompt is not.
+      </p>
+      <div class="acts">
+        <a class="btn primary" href="/demo">Run the demo &rarr;</a>
+        <a class="btn" href="#check">Check a file</a>
+      </div>
+      <p class="under">No account. Nothing pre-recorded. The demo generates real images and lets you break the proof yourself.</p>
+    </div>
+    <div class="specimen">
+      <div class="plate" id="plate"><img id="plateImg" alt="a signed asset from this pipeline"></div>
+      <div class="stampmark" id="plateMark">verified</div>
+      <p class="cap" id="plateCap">Loading a signed specimen.</p>
+    </div>
+  </section>
+</div>
+
+<!-- FULL BLEED WALL -->
+<section class="wall">
+  <div class="heading">
+    <div>
+      <p class="label">every one of these is a real signed file</p>
+      <p class="dim" style="margin-top:6px">Click any tile. It downloads the actual asset and runs it through the checker in front of you.</p>
+    </div>
+    <p class="faint" id="wallCount"></p>
+  </div>
+  <div class="strip" id="strip"></div>
+  <div class="wallout" id="wallOut"></div>
+</section>
+
+<!-- USE CASES -->
+<div class="wrap">
+  <section class="uses">
+    <p class="label">who needs this</p>
+
+    <div class="use">
+      <div class="n">01</div>
+      <div class="body">
+        <h3>An agency handing finished work to a client</h3>
+        <p>
+          The client asks which parts were generated and who approved them. You send a
+          spreadsheet, and they take your word for it. Here the answer travels inside the
+          file: the model, the sign-off, the approver's own note, and a hash that fails
+          the moment anyone retouches the delivery.
+        </p>
+        <p class="today"><b>Today:</b> the paper trail lives in your project tool and stops at your firewall.</p>
+      </div>
+    </div>
+
+    <div class="use">
+      <div class="n">02</div>
+      <div class="body">
+        <h3>A brand marking synthetic media under the AI Act</h3>
+        <p>
+          From 2 August 2026, Article 50 asks providers to mark generated output in a
+          machine readable way. A line in the caption is not a mark and does not survive
+          a re-upload. This writes the IPTC digital source type into the asset itself,
+          which is the vocabulary the checking tools already read.
+        </p>
+        <p class="today"><b>Today:</b> disclosure sits in the post copy, and the file arrives bare.</p>
+      </div>
+    </div>
+
+    <div class="use">
+      <div class="n">03</div>
+      <div class="body">
+        <h3>A newsroom or marketplace checking what came in</h3>
+        <p>
+          Someone hands you an image. You have no relationship with whoever made it and
+          no login for their system. Drop the file into the public checker and get one of
+          four answers: signed and unaltered, signed but edited since, unsigned, or a
+          record that fails its own check.
+        </p>
+        <p class="today"><b>Today:</b> you judge by eye, and the eye is losing.</p>
+      </div>
+    </div>
+
+    <div class="use">
+      <div class="n">04</div>
+      <div class="body">
+        <h3>A studio that wants to know what an asset really costs</h3>
+        <p>
+          Acceptance rate, render latency and cost per usable asset are unknowable if you
+          bin the failures. Every attempt is kept, rejects included, each with the note on
+          why it lost. The rejects are the part that tells you whether the pipeline is
+          working.
+        </p>
+        <p class="today"><b>Today:</b> the misses are deleted, so the numbers are guesses.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- PROPERTIES -->
+<div class="wrap">
+  <section class="props">
+    <p class="label">what a client actually sees</p>
+    <h2 class="display" style="font-size:clamp(28px,4.2vw,50px);margin-top:10px">
+      Right click. Properties. There it is.
+    </h2>
+    <div class="propsgrid">
+      <div>
+        <p class="dim">
+          A proof that only exists inside the system that made it is not much of a proof.
+          So the signature is written into the file as ordinary image metadata, the kind
+          Windows, macOS and every photo tool have read for twenty years.
+        </p>
+        <p class="dim">
+          It goes in <em>before</em> the file is hashed. That matters: the visible
+          signature is part of the bytes the record covers, so editing the credit out
+          breaks the check just like editing the picture does. It is not a caption sitting
+          next to the asset, it is inside it.
+        </p>
+        <p class="faint" style="font-size:12.5px">
+          Measured, not assumed. The same signature written into a PNG three separate ways
+          shows nothing at all in the Windows properties dialog, because Windows has no
+          property handler for PNG metadata. That is why the delivered asset is a JPEG.
+        </p>
+      </div>
+      <div class="dialog">
+        <div class="bar"><span>hallmark-asset.jpg Properties</span><span class="faint">&times;</span></div>
+        <div class="tabs"><span>General</span><span class="on">Details</span><span>Security</span></div>
+        <dl>
+          <div class="prow"><dt>Title</dt><dd class="gold">AI generated, approved by Ama</dd></div>
+          <div class="prow"><dt>Subject</dt><dd>AI generated image, approved by Ama on 28 July 2026. Carries a HALLMARK provenance record.</dd></div>
+          <div class="prow"><dt>Tags</dt><dd>AI generated; HALLMARK; provenance</dd></div>
+          <div class="prow"><dt>Authors</dt><dd class="gold">Ama</dd></div>
+          <div class="prow"><dt>Comments</dt><dd>Generated with gpt-image-2-generate on GMI Cloud. Signed off by Ama on 28 July 2026. The prompt is withheld by the publisher.</dd></div>
+          <div class="prow"><dt>Program name</dt><dd>gpt-image-2-generate via GMI Cloud, recorded by HALLMARK</dd></div>
+          <div class="prow"><dt>Date taken</dt><dd>28/07/2026</dd></div>
+        </dl>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- TAMPER -->
+<section class="band">
+  <div class="wrap">
+    <p class="label">the same file, one byte apart</p>
+    <h2 class="display" style="font-size:clamp(26px,4vw,46px);margin-top:10px">A record that cannot say no is not a record.</h2>
+    <div class="two">
+      <div class="side pass">
+        <h4>Verified</h4>
+        <p>The bytes hash to exactly what was recorded when the asset was generated and approved. Model, approver and date all resolve.</p>
+        <p class="hash">sha256 9f2c11ab &hellip; matches the hash struck into the file</p>
+      </div>
+      <div class="side fail">
+        <h4>Altered</h4>
+        <p>Brighten it, crop it, flip one byte of it, or edit the credit out of the metadata. The record stays perfectly valid and stops describing this file.</p>
+        <p class="hash">sha256 4c81d0e7 &hellip; matches nothing the record declares</p>
+      </div>
+    </div>
+    <p class="faint" style="margin-top:26px;max-width:64ch">
+      Both verdicts are produced by the same public endpoint, with no login and no
+      relationship to whoever made the file. You can see it happen on the demo, on an
+      image you generated yourself, in about two minutes.
+    </p>
+  </div>
+</section>
+
+<!-- CHECK ANY FILE -->
+<div class="wrap">
+  <section class="check" id="check">
+    <p class="label">check any file</p>
+    <h2 class="display" style="font-size:clamp(28px,4.2vw,50px);margin-top:10px">Bring your own.</h2>
+    <p class="dim" style="max-width:60ch;margin-top:14px">
+      An image, a video or an audio file, signed by this pipeline or not. Nothing is
+      stored. A file with no record gets told so plainly, which is the honest answer for
+      almost everything on the internet.
+    </p>
+    <label class="drop" id="drop">
+      <input type="file" id="file" style="display:none" accept="image/*,video/mp4,audio/*">
+      <p><span class="struck">Choose a file</span> or drop one here</p>
+      <p class="faint" style="margin-top:8px;font-size:12px">png, jpg, mp4 and mp3, up to 200MB</p>
+    </label>
+    <div class="checkout">
+      <div class="verdict hidden" id="cVerdict"><h3 id="cLabel"></h3><p id="cSaid"></p></div>
+      <dl class="rows hidden" id="cRows" style="margin-top:18px;max-width:780px">
+        <div class="row"><dt>Hash now</dt><dd id="cNow"></dd></div>
+        <div class="row"><dt>Hash recorded</dt><dd id="cRec"></dd></div>
+        <div class="row"><dt>Record found in</dt><dd id="cSrc"></dd></div>
+        <div class="row"><dt>Signed off by</dt><dd id="cWho"></dd></div>
+        <div class="row"><dt>Made with</dt><dd id="cModel"></dd></div>
+        <div class="row"><dt>Prompt</dt><dd id="cPrompt"></dd></div>
+      </dl>
+    </div>
+  </section>
+</div>
+
+<!-- CLOSE -->
+<section class="close">
+  <div class="wrap">
+    <p class="label">two minutes, three images, one broken proof</p>
+    <h2 class="display">Make one.<br>Then try to fake it.</h2>
+    <div class="acts">
+      <a class="btn primary" href="/demo">Run the demo &rarr;</a>
+      <a class="btn" href="#check">Check a file first</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>
+    From 2 August 2026, providers of systems that generate synthetic audio, image, video
+    or text must mark those outputs in a machine readable way under Article 50 of the EU
+    AI Act. A line of small print is not a mark, and it does not survive a re-upload.
+  </p>
+  <p style="margin-top:14px">
+    Generated through GMI Cloud, orchestrated with Genblaze, stored on Backblaze B2.
+    <a href="/health">status</a>
+  </p>
+</footer>
+
+<script>
+const el = id => document.getElementById(id);
+const set = (id, v) => { const n = el(id); if (n) n.textContent = (v === null || v === undefined || v === '') ? '-' : v; };
+
+/* ---- proof bubbles --------------------------------------------------- */
+function attachBubbles(host, facts) {
+  const layer = document.createElement('div');
+  layer.className = 'bubbles';
+  host.appendChild(layer);
+  let timer = null, i = 0;
+  const pop = () => {
+    const f = facts[i++ % facts.length];
+    if (!f || !f.text) return;
+    const b = document.createElement('span');
+    b.className = 'bubble' + (f.ok ? ' ok' : '');
+    const d = document.createElement('span'); d.className = 'dot';
+    b.appendChild(d); b.appendChild(document.createTextNode(f.text));
+    b.style.left = (6 + Math.random() * 44) + '%';
+    b.style.bottom = (14 + Math.random() * 26) + '%';
+    b.style.setProperty('--drift', (Math.random() * 34 - 17).toFixed(0) + 'px');
+    b.addEventListener('animationend', () => b.remove());
+    layer.appendChild(b);
+  };
+  host.addEventListener('mouseenter', () => { if (!timer) { pop(); timer = setInterval(pop, 620); } });
+  host.addEventListener('mouseleave', () => { clearInterval(timer); timer = null; });
+}
+
+/* ---- the wall of real signed assets ---------------------------------- */
+let SHOWCASE = null;
+
+async function loadShowcase() {
+  try {
+    SHOWCASE = await (await fetch('/api/showcase')).json();
+  } catch (e) { return; }
+
+  const tiles = SHOWCASE.gallery || [];
+  if (!tiles.length) return;
+
+  // Hero specimen: the first tile, shown full size.
+  el('plateImg').src = '/api/thumb/' + tiles[0].slug;
+  el('plateImg').alt = tiles[0].title || 'a signed asset';
+  set('plateCap', `${tiles[0].title} · ${tiles[0].model} · sha ${(tiles[0].sha256 || '').slice(0, 12)}`);
+  attachBubbles(el('plate'), [
+    { text: 'record found', ok: true },
+    { text: 'prompt withheld' },
+    { text: `sha ${(tiles[0].sha256 || '').slice(0, 10)}` },
+    { text: `${tiles[0].model}` },
+  ]);
+
+  set('wallCount', `${tiles.length} assets · every one verifiable`);
+
+  const strip = el('strip');
+  strip.innerHTML = '';
+  tiles.forEach(t => {
+    const node = document.createElement('div');
+    node.className = 'tile';
+    const img = document.createElement('img');
+    img.src = '/api/thumb/' + t.slug;
+    img.alt = t.title || t.slug;
+    img.loading = 'lazy';
+    const name = document.createElement('span');
+    name.className = 'name'; name.textContent = t.title || t.slug;
+    node.appendChild(img); node.appendChild(name);
+    node.addEventListener('click', () => checkTile(node, t));
+    attachBubbles(node, [
+      { text: 'signed', ok: true },
+      { text: `sha ${(t.sha256 || '').slice(0, 10)}` },
+      { text: 'click to check' },
+    ]);
+    strip.appendChild(node);
+  });
+}
+
+async function checkTile(node, tile) {
+  const out = el('wallOut');
+  document.querySelectorAll('.tile').forEach(n => n.classList.remove('checking', 'done'));
+  node.classList.add('checking');
+  out.innerHTML = `<p class="dim">Fetching ${tile.title} and checking it. This is the full stamped file, not the thumbnail.</p>`;
+
+  try {
+    const bytes = await (await fetch('/api/gallery/' + tile.slug)).blob();
+    const body = new FormData();
+    body.append('file', bytes, tile.slug + '.png');
+    const d = await (await fetch('/api/verify', { method: 'POST', body })).json();
+    node.classList.remove('checking');
+    node.classList.add('done');
+    const withheld = (d.steps || []).every(s => s.prompt_withheld);
+    out.innerHTML = `
+      <div class="verdict ${d.verdict}">
+        <h3>${d.verdict}</h3>
+        <p>${d.summary} ${withheld ? 'The prompt stayed with the publisher.' : ''}</p>
+      </div>
+      <p class="faint" style="margin-top:10px">
+        ${tile.title} · ${Math.round((tile.size_bytes || 0) / 1024)}KB ·
+        sha ${(d.computed_sha256 || '').slice(0, 24)} ·
+        record ${d.manifest_source && d.manifest_source.startsWith('fetched') ? 'resolved from storage' : d.manifest_source}
+      </p>`;
+  } catch (err) {
+    node.classList.remove('checking');
+    out.innerHTML = `<p class="err">Could not check that one: ${err.message}</p>`;
+  }
+}
+
+/* ---- bring your own file --------------------------------------------- */
+const drop = el('drop');
+['dragenter', 'dragover'].forEach(k => drop.addEventListener(k, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(k => drop.addEventListener(k, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) checkFile(e.dataTransfer.files[0]); });
+el('file').addEventListener('change', e => { if (e.target.files[0]) checkFile(e.target.files[0]); });
+
+async function checkFile(file) {
+  el('cVerdict').className = 'verdict';
+  set('cLabel', 'checking'); set('cSaid', `${file.name}, ${Math.round(file.size / 1024)}KB`);
+  el('cVerdict').classList.remove('hidden');
+  el('cRows').classList.add('hidden');
+
+  try {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    const d = await (await fetch('/api/verify', { method: 'POST', body })).json();
+
+    el('cVerdict').className = 'verdict ' + d.verdict;
+    set('cLabel', d.verdict);
+    set('cSaid', d.reason ? `${d.summary} ${d.reason}.` : d.summary);
+
+    const same = d.computed_sha256 && d.computed_sha256 === d.declared_sha256;
+    el('cNow').className = same ? 'match' : '';
+    set('cNow', d.computed_sha256);
+    set('cRec', d.declared_sha256);
+    set('cSrc', d.manifest_source === 'none' ? 'nothing embedded' : d.manifest_source);
+
+    const step = (d.steps || [])[0];
+    const ok = d.approval;
+    set('cWho', ok
+      ? `${ok.approver}, ${ok.decision}${ok.note ? ` ("${ok.note}")` : ''}`
+      : null);
+    set('cModel', step ? `${step.model} (${step.provider || 'unknown provider'})` : null);
+    set('cPrompt', step ? (step.prompt_withheld ? 'withheld by the publisher' : step.prompt) : null);
+    el('cRows').classList.remove('hidden');
+  } catch (err) {
+    el('cVerdict').className = 'verdict broken';
+    set('cLabel', 'error'); set('cSaid', err.message);
+  }
+}
+
+loadShowcase();
+</script>
+</body>
+</html>

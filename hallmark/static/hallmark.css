@@ -1,0 +1,155 @@
+/*
+  HALLMARK — shared surface.
+
+  An assay report rather than a landing page: ink-dark ground, one struck
+  brass accent that only ever means "signed", monospace for anything a machine
+  produced, and a serif reserved for the things a person wrote. The faint grid
+  is there to make the page read as a working document, not a brochure.
+*/
+
+:root {
+  --ink: #e8e4dc;
+  --dim: #8b8478;
+  --faint: #4a463f;
+  --bg: #121110;
+  --panel: #1a1917;
+  --deep: #0c0b0a;
+  --rule: #2c2a26;
+  --rule-soft: #221f1c;
+
+  --pass: #7fb069;
+  --fail: #d1495b;
+  --warn: #e0a458;
+  --struck: #c9a227;
+  --struck-lit: #e8c04a;
+
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    linear-gradient(rgba(232, 228, 220, .018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 228, 220, .018) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+
+::selection { background: var(--struck); color: var(--deep); }
+
+/* --- rails ------------------------------------------------------------- */
+.masthead {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+  padding: 15px 5vw; border-bottom: 1px solid var(--rule);
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(18, 17, 16, .93); backdrop-filter: blur(8px);
+}
+.wordmark {
+  font-size: 13px; letter-spacing: .4em; text-transform: uppercase;
+  font-weight: 600; text-decoration: none;
+}
+.mastnav { display: flex; gap: 22px; align-items: baseline; }
+.mastnav a {
+  font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--dim); text-decoration: none;
+}
+.mastnav a:hover, .mastnav a.here { color: var(--ink); }
+.mastnav a.here { color: var(--struck); }
+
+.label {
+  font-size: 10.5px; letter-spacing: .24em; text-transform: uppercase;
+  color: var(--dim); margin: 0;
+}
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 5vw; }
+
+/* --- type -------------------------------------------------------------- */
+.display {
+  font-family: var(--display); font-weight: 400;
+  letter-spacing: -.03em; line-height: .96; margin: 0;
+}
+.serif { font-family: var(--display); font-weight: 400; letter-spacing: -.02em; }
+.struck { color: var(--struck); }
+.dim { color: var(--dim); }
+.faint { color: var(--faint); }
+
+/* --- controls ---------------------------------------------------------- */
+button, .btn {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .12em;
+  text-transform: uppercase; background: transparent; color: var(--ink);
+  border: 1px solid var(--faint); padding: 13px 22px; cursor: pointer;
+  text-decoration: none; display: inline-block;
+  transition: border-color .12s, background .12s, color .12s;
+}
+button:hover:not(:disabled), .btn:hover { border-color: var(--ink); background: #201e1b; }
+button:disabled { opacity: .4; cursor: default; }
+button.primary, .btn.primary {
+  border-color: var(--struck); color: var(--struck-lit);
+  background: rgba(201, 162, 39, .08);
+}
+button.primary:hover:not(:disabled), .btn.primary:hover {
+  background: var(--struck); color: var(--deep); border-color: var(--struck);
+}
+button.danger { border-color: rgba(209, 73, 91, .6); color: var(--fail); }
+button.danger:hover:not(:disabled) { background: rgba(209, 73, 91, .12); }
+
+input[type=text] {
+  font-family: var(--mono); font-size: 14px;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--rule); padding: 14px 16px; min-width: 0;
+}
+input[type=text]:focus { outline: none; border-color: var(--dim); }
+
+/* --- verdicts ---------------------------------------------------------- */
+.verdict { border-left: 3px solid var(--faint); padding: 4px 0 4px 18px; }
+.verdict.verified { border-color: var(--pass); }
+.verdict.altered, .verdict.broken { border-color: var(--fail); }
+.verdict.unsigned { border-color: var(--warn); }
+.verdict h3 {
+  margin: 0; font-size: clamp(19px, 2.6vw, 27px); letter-spacing: .18em;
+  text-transform: uppercase; font-weight: 600;
+}
+.verdict.verified h3 { color: var(--pass); }
+.verdict.altered h3, .verdict.broken h3 { color: var(--fail); }
+.verdict.unsigned h3 { color: var(--warn); }
+.verdict p { margin: 6px 0 0; color: var(--dim); }
+
+.rows { margin: 0; }
+.row {
+  display: grid; grid-template-columns: 168px 1fr; gap: 14px;
+  padding: 7px 0; border-bottom: 1px solid var(--rule);
+}
+.row dt {
+  color: var(--dim); font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.row dd { margin: 0; word-break: break-all; font-size: 12.5px; }
+.row dd.match { color: var(--pass); }
+.row dd.mismatch { color: var(--fail); }
+
+.hidden { display: none; }
+.err { color: var(--fail); }
+
+/* --- footer ------------------------------------------------------------ */
+footer {
+  border-top: 1px solid var(--rule); padding: 6vh 5vw;
+  color: var(--faint); font-size: 12.5px;
+}
+footer p { max-width: 68ch; }
+footer a { color: var(--dim); }
+
+@media (max-width: 780px) {
+  .row { grid-template-columns: 1fr; gap: 2px; }
+  .mastnav { gap: 14px; }
+}

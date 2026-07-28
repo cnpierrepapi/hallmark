@@ -34,6 +34,18 @@ def _png(path: Path, colour=(200, 120, 40)) -> bytes:
     return path.read_bytes()
 
 
+def _jpeg(path: Path, colour=(200, 120, 40)) -> bytes:
+    # Noise rather than a flat fill: a uniform JPEG compresses to almost
+    # nothing, which would not exercise a realistic segment layout.
+    image = Image.new("RGB", (64, 64), colour)
+    pixels = image.load()
+    for x in range(64):
+        for y in range(64):
+            pixels[x, y] = ((x * 7) % 256, (y * 11) % 256, ((x + y) * 3) % 256)
+    image.save(path, "JPEG", quality=92)
+    return path.read_bytes()
+
+
 def _box(box_type: bytes, payload: bytes) -> bytes:
     return struct.pack(">I", len(payload) + 8) + box_type + payload
 
@@ -66,6 +78,7 @@ def _manifest(sha256: str, media_type: str, modality: Modality) -> Manifest:
 
 CASES = [
     ("png", "image/png", Modality.IMAGE, _png),
+    ("jpg", "image/jpeg", Modality.IMAGE, _jpeg),
     ("mp4", "video/mp4", Modality.VIDEO, _mp4),
     ("mp3", "audio/mpeg", Modality.AUDIO, _mp3),
 ]

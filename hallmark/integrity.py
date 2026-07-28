@@ -34,6 +34,12 @@ from genblaze_core.models.manifest import Manifest
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
+# JPEG carries the record in an XMP packet, which is where genblaze's own JPEG
+# handler puts it, so a file stamped here is readable by the stock SDK too.
+XMP_APP1_HEADER = b"http://ns.adobe.com/xap/1.0/\x00"
+XMP_MANIFEST_OPEN = "<mf:manifest>"
+XMP_MANIFEST_CLOSE = "</mf:manifest>"
+
 
 class UnsupportedMediaError(Exception):
     """Raised when a file's container has no known strip routine."""
@@ -182,6 +188,74 @@ def _embedded_json_mp4(data: bytes) -> str | None:
     return None
 
 
+def _jpeg_segments(data: bytes):
+    """Yield ``(start, end, marker, payload)`` for each JPEG segment.
+
+    Scanning stops at the start of scan marker. Everything after it is
+    entropy-coded image data with no segment structure, so walking into it
+    would read compressed pixels as if they were headers.
+    """
+    if data[:2] != b"\xff\xd8":
+        raise UnsupportedMediaError("Not a valid JPEG (no SOI marker)")
+
+    pos = 2
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            break
+        marker = data[pos + 1]
+        # Standalone markers carry no length field.
+        if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7 or marker == 0x01:
+            pos += 2
+            continue
+        length = struct.unpack(">H", data[pos + 2 : pos + 4])[0]
+        end = pos + 2 + length
+        if length < 2 or end > len(data):
+            raise UnsupportedMediaError("Truncated or malformed JPEG segment")
+        yield pos, end, marker, data[pos + 4 : end]
+        if marker == 0xDA:  # start of scan
+            return
+        pos = end
+
+
+def _is_manifest_packet(payload: bytes) -> bool:
+    return payload.startswith(XMP_APP1_HEADER) and XMP_MANIFEST_OPEN.encode() in payload
+
+
+def _strip_jpeg(data: bytes) -> bytes:
+    """Return JPEG bytes with the genblaze XMP packet removed.
+
+    Only the packet carrying the record goes. A JPEG delivered by this
+    pipeline also holds an XMP packet and an EXIF block describing it in plain
+    words, and those were written before the file was hashed: they are part of
+    the asset, not decoration on top of it. Removing them here would make an
+    unaltered file look altered.
+    """
+    out = bytearray()
+    cursor = 0
+    for start, end, marker, payload in _jpeg_segments(data):
+        if marker == 0xE1 and _is_manifest_packet(payload):
+            out += data[cursor:start]
+            cursor = end
+    out += data[cursor:]
+    return bytes(out)
+
+
+def _embedded_json_jpeg(data: bytes) -> str | None:
+    """Return the raw genblaze payload from a JPEG XMP packet, or None."""
+    import html
+
+    for _start, _end, marker, payload in _jpeg_segments(data):
+        if marker != 0xE1 or not _is_manifest_packet(payload):
+            continue
+        text = payload[len(XMP_APP1_HEADER) :].decode("utf-8", "replace")
+        begin = text.find(XMP_MANIFEST_OPEN)
+        finish = text.find(XMP_MANIFEST_CLOSE)
+        if begin == -1 or finish <= begin:
+            continue
+        return html.unescape(text[begin + len(XMP_MANIFEST_OPEN) : finish])
+    return None
+
+
 def _strip_mp3(data: bytes) -> bytes:
     """Return MP3 bytes with the genblaze ID3v2 TXXX frame removed.
 
@@ -243,12 +317,14 @@ def _embedded_json_mp3(data: bytes) -> str | None:
 
 _STRIPPERS = {
     "image/png": _strip_png,
+    "image/jpeg": _strip_jpeg,
     "video/mp4": _strip_mp4,
     "audio/mpeg": _strip_mp3,
 }
 
 _EXTRACTORS = {
     "image/png": _embedded_json_png,
+    "image/jpeg": _embedded_json_jpeg,
     "video/mp4": _embedded_json_mp4,
     "audio/mpeg": _embedded_json_mp3,
 }

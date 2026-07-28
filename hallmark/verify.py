@@ -75,6 +75,7 @@ class VerificationResult:
     created_at: datetime | None = None
     canonical_hash: str | None = None
     schema_version: str | None = None
+    approval: dict[str, Any] | None = None
     steps: list[ProvenanceStep] = field(default_factory=list)
 
     @property
@@ -95,6 +96,7 @@ class VerificationResult:
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "canonical_hash": self.canonical_hash,
             "schema_version": self.schema_version,
+            "approval": self.approval,
             "steps": [
                 {
                     "provider": step.provider,
@@ -295,5 +297,10 @@ def verify(path: Path, mime_type: str | None = None) -> VerificationResult:
         created_at=manifest.run.created_at,
         canonical_hash=manifest.canonical_hash,
         schema_version=manifest.schema_version,
+        # The sign-off is inside the canonical hash, so it is as tamper
+        # evident as the pixels. Surfacing it is the whole point: a verifier
+        # wants to know which person stood behind this, not only which model
+        # produced it.
+        approval=(manifest.run.metadata or {}).get("approval"),
         steps=_steps_from(manifest),
     )

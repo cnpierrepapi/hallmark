@@ -24,7 +24,19 @@ from genblaze_core.media.png import ITXT_KEY
 from genblaze_core.models.manifest import Manifest
 from genblaze_core.models.policy import EmbedPolicy
 
-from hallmark.integrity import PNG_SIGNATURE, UnsupportedMediaError, _read_box_size
+from hallmark.integrity import (
+    PNG_SIGNATURE,
+    XMP_APP1_HEADER,
+    XMP_MANIFEST_CLOSE,
+    XMP_MANIFEST_OPEN,
+    UnsupportedMediaError,
+    _is_manifest_packet,
+    _jpeg_segments,
+    _read_box_size,
+)
+
+# An APP segment's length field is 16 bits, so its payload cannot exceed this.
+MAX_APP1_BYTES = 65533
 
 
 def _png_itxt(keyword: str, text: str) -> bytes:
@@ -100,6 +112,61 @@ def _write_mp4(source: Path, dest: Path, payload: str) -> None:
     dest.write_bytes(bytes(out))
 
 
+def _write_jpeg(source: Path, dest: Path, payload: str) -> None:
+    """Insert the record as an XMP packet, leaving every other byte alone.
+
+    Genblaze's JPEG handler re-encodes the image through Pillow to write its
+    XMP. That rewrites the entire file, so stripping the record afterwards
+    cannot return the original bytes, and a hash taken before embedding will
+    never match again. Splicing one segment in keeps the round trip exact.
+
+    The packet is deliberately a second one. A delivered asset already carries
+    an XMP packet describing it in human words, written before the file was
+    hashed, and that one has to survive stripping untouched.
+    """
+    import html
+
+    data = source.read_bytes()
+
+    # Drop any record already present so re-stamping leaves exactly one.
+    kept = bytearray()
+    cursor = 0
+    for start, end, marker, segment in _jpeg_segments(data):
+        if marker == 0xE1 and _is_manifest_packet(segment):
+            kept += data[cursor:start]
+            cursor = end
+    kept += data[cursor:]
+    out = bytes(kept)
+
+    # Sit with the other application segments, after any JFIF, EXIF or XMP
+    # block the file already carries.
+    insert_at = 2
+    for _start, end, marker, _segment in _jpeg_segments(out):
+        if not 0xE0 <= marker <= 0xEF:
+            break
+        insert_at = end
+
+    packet = (
+        '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"'
+        ' xmlns:mf="https://github.com/backblaze-labs/genblaze/ns/1.0/">'
+        '<rdf:Description rdf:about="">'
+        f"{XMP_MANIFEST_OPEN}{html.escape(payload, quote=False)}{XMP_MANIFEST_CLOSE}"
+        "</rdf:Description></rdf:RDF></x:xmpmeta>"
+        '<?xpacket end="w"?>'
+    )
+    body = XMP_APP1_HEADER + packet.encode("utf-8")
+    if len(body) + 2 > MAX_APP1_BYTES:
+        raise UnsupportedMediaError(
+            f"Record is {len(body)} bytes, too large for a JPEG APP1 segment. "
+            "Use pointer mode."
+        )
+
+    marker = b"\xff\xe1" + struct.pack(">H", len(body) + 2) + body
+    dest.write_bytes(out[:insert_at] + marker + out[insert_at:])
+
+
 def _write_mp3(source: Path, dest: Path, payload: str) -> None:
     from mutagen.id3 import ID3, TXXX, ID3NoHeaderError
 
@@ -118,6 +185,7 @@ def _write_mp3(source: Path, dest: Path, payload: str) -> None:
 
 _WRITERS = {
     "image/png": _write_png,
+    "image/jpeg": _write_jpeg,
     "video/mp4": _write_mp4,
     "audio/mpeg": _write_mp3,
 }
