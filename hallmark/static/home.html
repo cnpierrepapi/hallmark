@@ -372,7 +372,7 @@
     <label class="drop" id="drop">
       <input type="file" id="file" style="display:none" accept="image/*,video/mp4,audio/*">
       <p><span class="struck">Choose a file</span> or drop one here</p>
-      <p class="faint" style="margin-top:8px;font-size:12px">png, jpg, mp4 and mp3, up to 200MB</p>
+      <p class="faint" style="margin-top:8px;font-size:12px">png, jpg, mp4 and mp3, up to 4.5MB, which is this host's ceiling on an upload</p>
     </label>
     <div class="checkout">
       <div class="verdict hidden" id="cVerdict"><h3 id="cLabel"></h3><p id="cSaid"></p></div>
@@ -546,29 +546,60 @@ function attachClip(node, tile) {
   node.addEventListener('mouseleave', () => { if (video) video.pause(); });
 }
 
+// The platform refuses a request body over 4.5MB, so anything larger cannot
+// be checked by posting it. Clips are always larger.
+const UPLOAD_LIMIT = 4_200_000;
+
+async function sha256(buffer) {
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function checkTile(node, tile) {
   const out = el('wallOut');
   document.querySelectorAll('.tile').forEach(n => n.classList.remove('checking', 'done'));
   node.classList.add('checking');
   const clip = tile.kind === 'video';
-  out.innerHTML = `<p class="dim">Fetching ${tile.title} and checking it. This is the full stamped ${clip ? 'clip' : 'file'}, not the poster.</p>`;
+  const big = (tile.size_bytes || 0) > UPLOAD_LIMIT;
+  out.innerHTML = `<p class="dim">Downloading ${tile.title}, the full stamped ${clip ? 'clip' : 'file'} rather than the poster, and checking it.</p>`;
 
   try {
-    const bytes = await (await fetch('/api/gallery/' + tile.slug)).blob();
-    const body = new FormData();
-    body.append('file', bytes, tile.slug + (clip ? '.mp4' : '.png'));
-    const d = await (await fetch('/api/verify', { method: 'POST', body })).json();
+    // Download it either way, because the visitor's own copy is the thing
+    // being talked about.
+    const buffer = await (await fetch('/api/gallery/' + tile.slug)).arrayBuffer();
+    const mine = await sha256(buffer);
+
+    let d, how;
+    if (big) {
+      // Too large to post, so the checker reads the stored object and returns
+      // the hash of what it read. Comparing that against the hash this browser
+      // just computed shows both looked at the same bytes.
+      d = await (await fetch('/api/verify-stored/' + tile.slug)).json();
+      how = d.raw_sha256 === mine
+        ? 'Your browser hashed the file it downloaded, and the checker read a file with the same hash. Same bytes.'
+        : 'The checker read a different file from the one downloaded here.';
+      if (d.raw_sha256 !== mine) d = { ...d, verdict: 'broken' };
+    } else {
+      const body = new FormData();
+      body.append('file', new Blob([buffer]), tile.slug + (clip ? '.mp4' : '.png'));
+      d = await (await fetch('/api/verify', { method: 'POST', body })).json();
+      how = 'Posted from this browser to the public checker, with no account and no key.';
+    }
+
     node.classList.remove('checking');
     node.classList.add('done');
     const withheld = (d.steps || []).every(s => s.prompt_withheld);
+    const who = d.approval ? `${d.approval.approver}` : null;
     out.innerHTML = `
       <div class="verdict ${d.verdict}">
         <h3>${d.verdict}</h3>
-        <p>${d.summary} ${withheld ? 'The prompt stayed with the publisher.' : ''}</p>
+        <p>${d.summary} ${withheld ? 'The prompt stayed with the publisher.' : ''}
+           ${who ? `Signed off by ${who}.` : ''}</p>
       </div>
-      <p class="faint" style="margin-top:10px">
-        ${tile.title} · ${Math.round((tile.size_bytes || 0) / 1024)}KB ·
-        sha ${(d.computed_sha256 || '').slice(0, 24)} ·
+      <p class="dim" style="margin-top:10px">${how}</p>
+      <p class="faint" style="margin-top:6px">
+        ${tile.title} · ${(( tile.size_bytes || 0) / 1024 / 1024).toFixed(1)}MB ·
+        your sha ${mine.slice(0, 20)} ·
         record ${d.manifest_source && d.manifest_source.startsWith('fetched') ? 'resolved from storage' : d.manifest_source}
       </p>`;
   } catch (err) {
@@ -589,6 +620,18 @@ async function checkFile(file) {
   set('cLabel', 'checking'); set('cSaid', `${file.name}, ${Math.round(file.size / 1024)}KB`);
   el('cVerdict').classList.remove('hidden');
   el('cRows').classList.add('hidden');
+
+  // Say this plainly rather than letting the request bounce off the platform
+  // and return an error page nobody can read.
+  if (file.size > UPLOAD_LIMIT) {
+    el('cVerdict').className = 'verdict unsigned';
+    set('cLabel', 'too large to post');
+    set('cSaid',
+      `This host caps an upload at 4.5MB and that file is ${(file.size / 1024 / 1024).toFixed(1)}MB. ` +
+      'A file this size is checked where it is stored instead of being sent: that is what the clips on ' +
+      'the wall above do. Nothing about the file is wrong.');
+    return;
+  }
 
   try {
     const body = new FormData();

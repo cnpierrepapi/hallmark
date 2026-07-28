@@ -21,10 +21,16 @@ from hallmark.verify import verify
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-# Video is the large case. Beyond this a verifier should be checking the
-# stored asset rather than uploading, and an unbounded limit is a free
-# denial-of-service on a public endpoint.
-MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+# The platform rejects a request body over 4.5MB with
+# FUNCTION_PAYLOAD_TOO_LARGE before this function is ever invoked. Measured on
+# the deployment: 4.0MB returns a verdict, 4.4MB returns a 413 from the edge.
+#
+# So this ceiling is advisory, and any limit above it would be a lie. A caller
+# holding something bigger, which for video is most of the time, wants
+# /api/verify-stored instead: the bytes stay where they are and only the
+# verdict moves.
+PLATFORM_UPLOAD_LIMIT = 4_500_000
+MAX_UPLOAD_BYTES = 4 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -116,6 +122,54 @@ def gallery(slug: str) -> StreamingResponse:
     if entry is None:
         raise HTTPException(status_code=404, detail=f"No gallery tile {slug}")
     return _stream(entry["key"], entry.get("media_type", "image/png"))
+
+
+@app.get("/api/verify-stored/{slug}")
+def verify_stored(slug: str) -> JSONResponse:
+    """Verify a published asset without anyone uploading it.
+
+    A five second clip off this pipeline is 7 to 18MB, and the platform will
+    not accept a request body over 4.5MB, so the upload path simply cannot
+    reach the large assets. The bytes stay in storage and the verdict travels
+    instead.
+
+    ``raw_sha256`` is the hash of the whole stored file exactly as it sits,
+    before any provenance block is stripped. That is the number a visitor's
+    own browser can compute over the copy it just downloaded, so they can
+    confirm the checker read the same file they are holding rather than taking
+    our word for which bytes were examined.
+    """
+    import hashlib
+
+    entry = next((t for t in _showcase().get("gallery", []) if t["slug"] == slug), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No showcase tile {slug}")
+
+    from hallmark import storage
+
+    digest = hashlib.sha256()
+    suffix = Path(entry["key"]).suffix or ".bin"
+    handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp_path = Path(handle.name)
+    try:
+        with handle:
+            body = storage.client().get_object(
+                Bucket=storage.bucket(), Key=entry["key"]
+            )["Body"]
+            for chunk in body.iter_chunks(CHUNK_BYTES):
+                digest.update(chunk)
+                handle.write(chunk)
+
+        result = verify(tmp_path)
+        payload = result.to_dict()
+        payload["filename"] = Path(entry["key"]).name
+        payload["size_bytes"] = tmp_path.stat().st_size
+        payload["raw_sha256"] = digest.hexdigest()
+        payload["checked_from"] = "storage"
+        payload["visible"] = _visible_metadata(tmp_path, result.media_type)
+        return JSONResponse(payload)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 @app.get("/api/clip/{slug}")

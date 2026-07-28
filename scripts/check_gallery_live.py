@@ -15,12 +15,17 @@ copy ever verified, the check would be measuring the wrong bytes.
 
 from __future__ import annotations
 
+import hashlib
 import sys
 import time
 
 import httpx
 
 DEFAULT = "https://hallmark-rust.vercel.app"
+
+# The deployment's request body ceiling, measured: 4.0MB returns a verdict,
+# 4.4MB returns FUNCTION_PAYLOAD_TOO_LARGE from the edge.
+UPLOAD_LIMIT = 4_200_000
 
 
 def main() -> int:
@@ -61,9 +66,21 @@ def main() -> int:
             failures += 1
             continue
 
-        data = client.post(
-            f"{base}/api/verify", files={"file": (f"{slug}{suffix}", media.content, mime)}
-        ).json()
+        # The host rejects a request body over 4.5MB before the function runs,
+        # and every clip is larger than that. Those are checked where they are
+        # stored, and the hash the checker reports is compared against the hash
+        # of the copy downloaded here: same number, same bytes.
+        if len(media.content) > UPLOAD_LIMIT:
+            data = client.get(f"{base}/api/verify-stored/{slug}").json()
+            mine = hashlib.sha256(media.content).hexdigest()
+            if data.get("raw_sha256") != mine:
+                print(f"FAIL  {slug:24} checker read different bytes from the download")
+                failures += 1
+                continue
+        else:
+            data = client.post(
+                f"{base}/api/verify", files={"file": (f"{slug}{suffix}", media.content, mime)}
+            ).json()
         elapsed = time.monotonic() - started
 
         ok = data.get("verdict") == "verified"
