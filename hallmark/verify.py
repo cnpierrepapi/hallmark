@@ -21,7 +21,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import boto3
 from botocore.exceptions import ClientError
 from genblaze_core.media.embedder import guess_mime
 from genblaze_core.models.enums import PromptVisibility
@@ -113,13 +112,10 @@ class VerificationResult:
 
 
 def _s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=os.environ["B2_ENDPOINT"],
-        region_name=os.environ.get("B2_REGION"),
-        aws_access_key_id=os.environ["B2_KEY_ID"],
-        aws_secret_access_key=os.environ["B2_APP_KEY"],
-    )
+    """Reuse the shared, retrying client rather than building one per call."""
+    from hallmark import storage
+
+    return storage.client()
 
 
 def _fetch_manifest(manifest_uri: str) -> Manifest:

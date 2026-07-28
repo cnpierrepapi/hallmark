@@ -148,6 +148,44 @@ def cmd_time(models: list[str]) -> int:
     return 0
 
 
+def cmd_raw(model: str, payload_json: str) -> int:
+    """Submit one job with an explicit payload and wait for it.
+
+    Needed because each model family expects a different payload shape and the
+    catalog does not publish them, so the only way to learn a shape is to send
+    one and read the error.
+    """
+    payload = json.loads(payload_json)
+    with _client() as client:
+        resp = client.post("/requests", json={"model": model, "payload": payload}, timeout=180.0)
+        print(f"submit -> {resp.status_code}")
+        if resp.status_code >= 400:
+            print(resp.text[:800])
+            return 1
+
+        request_id = resp.json().get("request_id")
+        print(f"request_id {request_id}")
+
+        started = time.monotonic()
+        while time.monotonic() - started < MAX_WAIT:
+            time.sleep(POLL_INTERVAL)
+            detail = client.get(f"/requests/{request_id}").json()
+            status = detail.get("status")
+            elapsed = time.monotonic() - started
+            if status in TERMINAL_OK:
+                print(f"{status} after {elapsed:.1f}s")
+                print(json.dumps(detail.get("outcome"), indent=2)[:1200])
+                return 0
+            if status in TERMINAL_BAD:
+                print(f"{status} after {elapsed:.1f}s")
+                print(json.dumps(detail, indent=2)[:1200])
+                return 1
+            print(f"  ...{status} at {elapsed:.0f}s")
+
+    print("timed out")
+    return 1
+
+
 def main() -> int:
     load_dotenv(ROOT / ".env")
     if len(sys.argv) < 2:
@@ -155,6 +193,11 @@ def main() -> int:
         return 1
     if sys.argv[1] == "list":
         return cmd_list()
+    if sys.argv[1] == "raw":
+        if len(sys.argv) < 4:
+            print('Usage: gmi_probe.py raw <model> \'{"text": "..."}\'')
+            return 1
+        return cmd_raw(sys.argv[2], sys.argv[3])
     if sys.argv[1] == "time":
         models = sys.argv[2:]
         if not models:

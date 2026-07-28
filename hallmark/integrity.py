@@ -20,12 +20,14 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
+import tempfile
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
 from genblaze_core.media import get_handler
 from genblaze_core.media.embedder import guess_mime
+from genblaze_core.media.mp3 import TXXX_DESC
 from genblaze_core.media.mp4 import GENBLAZE_UUID_BYTES
 from genblaze_core.media.png import ITXT_KEY
 from genblaze_core.models.manifest import Manifest
@@ -180,14 +182,75 @@ def _embedded_json_mp4(data: bytes) -> str | None:
     return None
 
 
+def _strip_mp3(data: bytes) -> bytes:
+    """Return MP3 bytes with the genblaze ID3v2 TXXX frame removed.
+
+    Unlike PNG and MP4, this cannot patch bytes in place, because the ID3
+    container is rewritten by the tag library on save. Removing only our own
+    frame and letting mutagen rewrite the tag is deterministic for files this
+    pipeline produced, which is what the round-trip test pins down.
+    """
+    from mutagen.id3 import ID3, ID3NoHeaderError
+    from mutagen.mp3 import MP3
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as handle:
+        handle.write(data)
+        tmp = Path(handle.name)
+
+    try:
+        try:
+            tags = ID3(tmp)
+        except ID3NoHeaderError:
+            return data
+
+        if not tags.getall(f"TXXX:{TXXX_DESC}"):
+            return data
+
+        tags.delall(f"TXXX:{TXXX_DESC}")
+        if len(tags.keys()) == 0:
+            # Nothing else was ever in the tag, so remove it entirely rather
+            # than leave an empty ID3 header the original did not have.
+            tags.delete(tmp)
+            audio = MP3(tmp)
+            audio.save()
+        else:
+            tags.save(tmp)
+        return tmp.read_bytes()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _embedded_json_mp3(data: bytes) -> str | None:
+    """Return the raw genblaze TXXX payload from an MP3, or None."""
+    from mutagen.id3 import ID3, ID3NoHeaderError
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as handle:
+        handle.write(data)
+        tmp = Path(handle.name)
+
+    try:
+        try:
+            tags = ID3(tmp)
+        except ID3NoHeaderError:
+            return None
+        frame = tags.get(f"TXXX:{TXXX_DESC}")
+        if frame is None:
+            return None
+        return frame.text[0]
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 _STRIPPERS = {
     "image/png": _strip_png,
     "video/mp4": _strip_mp4,
+    "audio/mpeg": _strip_mp3,
 }
 
 _EXTRACTORS = {
     "image/png": _embedded_json_png,
     "video/mp4": _embedded_json_mp4,
+    "audio/mpeg": _embedded_json_mp3,
 }
 
 
