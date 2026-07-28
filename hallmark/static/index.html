@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HALLMARK / verify</title>
+<style>
+  :root {
+    --ink: #e8e4dc;
+    --dim: #8b8478;
+    --faint: #4a463f;
+    --bg: #121110;
+    --panel: #1a1917;
+    --rule: #2c2a26;
+    --pass: #7fb069;
+    --fail: #d1495b;
+    --warn: #e0a458;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  header { border-bottom: 1px solid var(--rule); padding-bottom: 18px; }
+  h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+  }
+  .tagline { margin: 8px 0 0; color: var(--dim); max-width: 56ch; }
+
+  .lede { margin: 32px 0 0; color: var(--dim); max-width: 62ch; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  #drop {
+    margin-top: 28px;
+    border: 1px dashed var(--faint);
+    background: var(--panel);
+    padding: 44px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  #drop:hover, #drop.hot { border-color: var(--dim); background: #201e1b; }
+  #drop.hot { border-style: solid; }
+  #drop p { margin: 0; color: var(--dim); }
+  #drop .hint { margin-top: 8px; font-size: 12px; color: var(--faint); }
+  input[type=file] { display: none; }
+
+  .status { margin-top: 20px; color: var(--dim); }
+
+  .verdict {
+    margin-top: 32px;
+    border-left: 3px solid var(--faint);
+    padding: 2px 0 2px 20px;
+  }
+  .verdict.verified { border-color: var(--pass); }
+  .verdict.altered, .verdict.broken { border-color: var(--fail); }
+  .verdict.unsigned { border-color: var(--warn); }
+  .verdict h2 {
+    margin: 0;
+    font-size: 26px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .verdict.verified h2 { color: var(--pass); }
+  .verdict.altered h2, .verdict.broken h2 { color: var(--fail); }
+  .verdict.unsigned h2 { color: var(--warn); }
+  .verdict p { margin: 6px 0 0; color: var(--ink); }
+  .verdict .why { color: var(--dim); }
+
+  section { margin-top: 40px; }
+  h3 {
+    margin: 0 0 14px;
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-weight: 600;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 8px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 190px 1fr;
+    gap: 16px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row dt { color: var(--dim); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .row dd { margin: 0; word-break: break-all; }
+  dl { margin: 0; }
+
+  .hash { font-size: 12.5px; }
+  .hash.match { color: var(--pass); }
+  .hash.mismatch { color: var(--fail); }
+
+  .step { border-bottom: 1px solid var(--rule); padding: 14px 0; }
+  .step:last-child { border-bottom: 0; }
+  .step .head { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+  .step .model { font-weight: 600; }
+  .badge {
+    font-size: 10.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--dim);
+    border: 1px solid var(--rule);
+    padding: 1px 7px;
+  }
+  .prompt { margin: 9px 0 0; color: var(--dim); white-space: pre-wrap; }
+  .withheld { color: var(--faint); font-style: italic; }
+
+  .scroller { overflow-x: auto; }
+  footer { margin-top: 64px; border-top: 1px solid var(--rule); padding-top: 16px; color: var(--faint); font-size: 12px; }
+  .hidden { display: none; }
+
+  @media (max-width: 620px) {
+    .row { grid-template-columns: 1fr; gap: 2px; }
+    .verdict h2 { font-size: 21px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Hallmark</h1>
+  <p class="tagline">Provenance for generated media. Checked against the file itself.</p>
+</header>
+
+<p class="lede">
+  Drop in an image or video. If it was made through Hallmark it carries a record of
+  how it was generated, stamped into the file. This page reads that record and
+  confirms whether <strong>the media still matches it</strong>.
+  Nothing is stored, and no account is needed.
+</p>
+
+<div id="drop" tabindex="0" role="button" aria-label="Choose a file to verify">
+  <p>Drop a file here, or click to choose</p>
+  <p class="hint">PNG and MP4, up to 200MB</p>
+</div>
+<input type="file" id="picker" accept="image/png,video/mp4">
+
+<p class="status hidden" id="status"></p>
+
+<div id="result" class="hidden">
+
+  <div class="verdict" id="verdict">
+    <h2 id="verdictLabel"></h2>
+    <p id="verdictSummary"></p>
+    <p class="why hidden" id="verdictWhy"></p>
+  </div>
+
+  <section>
+    <h3>Integrity</h3>
+    <dl>
+      <div class="row"><dt>File</dt><dd id="fFilename"></dd></div>
+      <div class="row"><dt>Type</dt><dd id="fType"></dd></div>
+      <div class="row"><dt>Hash now</dt><dd id="fComputed" class="hash"></dd></div>
+      <div class="row"><dt>Hash recorded</dt><dd id="fDeclared" class="hash"></dd></div>
+      <div class="row"><dt>Record found in</dt><dd id="fSource"></dd></div>
+    </dl>
+  </section>
+
+  <section id="chainSection">
+    <h3>How it was made</h3>
+    <div id="chain"></div>
+  </section>
+
+  <section>
+    <h3>Record</h3>
+    <dl>
+      <div class="row"><dt>Run</dt><dd id="fRun"></dd></div>
+      <div class="row"><dt>Generated</dt><dd id="fCreated"></dd></div>
+      <div class="row"><dt>Record hash</dt><dd id="fCanonical" class="hash"></dd></div>
+      <div class="row"><dt>Schema</dt><dd id="fSchema"></dd></div>
+    </dl>
+  </section>
+
+</div>
+
+<footer>
+  Verification runs on the bytes you supply. A file whose record is valid but whose
+  pixels have changed will fail, which is the point.
+</footer>
+
+</div>
+
+<script>
+const drop = document.getElementById('drop');
+const picker = document.getElementById('picker');
+const statusEl = document.getElementById('status');
+const result = document.getElementById('result');
+
+const el = id => document.getElementById(id);
+const text = (id, value) => { el(id).textContent = (value === null || value === undefined || value === '') ? '-' : value; };
+
+drop.addEventListener('click', () => picker.click());
+drop.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); }
+});
+picker.addEventListener('change', () => { if (picker.files[0]) send(picker.files[0]); });
+
+['dragenter', 'dragover'].forEach(evt =>
+  drop.addEventListener(evt, e => { e.preventDefault(); drop.classList.add('hot'); }));
+['dragleave', 'drop'].forEach(evt =>
+  drop.addEventListener(evt, e => { e.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop', e => {
+  const file = e.dataTransfer.files[0];
+  if (file) send(file);
+});
+
+function setStatus(message) {
+  statusEl.textContent = message;
+  statusEl.classList.toggle('hidden', !message);
+}
+
+async function send(file) {
+  result.classList.add('hidden');
+  setStatus(`Checking ${file.name} ...`);
+
+  const body = new FormData();
+  body.append('file', file);
+
+  try {
+    const response = await fetch('/api/verify', { method: 'POST', body });
+    const data = await response.json();
+    if (!response.ok) {
+      setStatus(data.detail || `Verification failed (${response.status})`);
+      return;
+    }
+    setStatus('');
+    render(data);
+  } catch (err) {
+    setStatus(`Could not reach the verifier: ${err.message}`);
+  }
+}
+
+function render(d) {
+  const verdict = el('verdict');
+  verdict.className = 'verdict ' + d.verdict;
+  text('verdictLabel', d.verdict);
+  text('verdictSummary', d.summary);
+
+  const why = el('verdictWhy');
+  why.textContent = d.reason || '';
+  why.classList.toggle('hidden', !d.reason);
+
+  text('fFilename', d.filename);
+  text('fType', d.media_type);
+  text('fSource', d.manifest_source === 'none' ? 'nothing found' : d.manifest_source);
+
+  const match = d.declared_sha256 && d.computed_sha256 === d.declared_sha256;
+  const cls = d.declared_sha256 ? (match ? 'hash match' : 'hash mismatch') : 'hash';
+  el('fComputed').className = cls;
+  el('fDeclared').className = cls;
+  text('fComputed', d.computed_sha256);
+  text('fDeclared', d.declared_sha256);
+
+  text('fRun', d.run_name ? `${d.run_name} (${d.run_id})` : d.run_id);
+  text('fCreated', d.created_at ? new Date(d.created_at).toLocaleString() : null);
+  text('fCanonical', d.canonical_hash);
+  text('fSchema', d.schema_version);
+
+  const chain = el('chain');
+  chain.innerHTML = '';
+  el('chainSection').classList.toggle('hidden', !d.steps || d.steps.length === 0);
+
+  (d.steps || []).forEach(step => {
+    const node = document.createElement('div');
+    node.className = 'step';
+
+    const head = document.createElement('div');
+    head.className = 'head';
+
+    const model = document.createElement('span');
+    model.className = 'model';
+    model.textContent = step.model;
+    head.appendChild(model);
+
+    [step.provider, step.modality, step.step_type].filter(Boolean).forEach(label => {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = label;
+      head.appendChild(badge);
+    });
+    node.appendChild(head);
+
+    const prompt = document.createElement('p');
+    if (step.prompt_withheld) {
+      prompt.className = 'prompt withheld';
+      prompt.textContent = 'Prompt withheld by the publisher.';
+    } else {
+      prompt.className = 'prompt';
+      prompt.textContent = step.prompt || '';
+    }
+    node.appendChild(prompt);
+
+    chain.appendChild(node);
+  });
+
+  result.classList.remove('hidden');
+}
+</script>
+</body>
+</html>

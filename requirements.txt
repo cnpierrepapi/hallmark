@@ -1,3 +1,9 @@
-genblaze[gmicloud]==0.4.4
+# Runtime dependencies for the deployed verify service.
+# Deliberately excludes provider adapters: verification reads manifests and
+# hashes bytes, it never generates. Keeping them out holds the serverless
+# bundle well under the size limit.
+genblaze-core==0.3.7
 genblaze-s3==0.3.6
+fastapi==0.140.7
+python-multipart==0.0.20
 python-dotenv==1.0.1

@@ -18,6 +18,7 @@ functions inside the SDK.
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
 import zlib
 from dataclasses import dataclass
@@ -131,10 +132,82 @@ def _strip_mp4(data: bytes) -> bytes:
     return bytes(out)
 
 
+def _embedded_json_png(data: bytes) -> str | None:
+    """Return the raw genblaze iTXt text from a PNG, or None if absent."""
+    if data[: len(PNG_SIGNATURE)] != PNG_SIGNATURE:
+        raise UnsupportedMediaError("Not a valid PNG (signature mismatch)")
+
+    keyword = ITXT_KEY.encode("latin-1")
+    pos = len(PNG_SIGNATURE)
+
+    while pos + 12 <= len(data):
+        length = struct.unpack(">I", data[pos : pos + 4])[0]
+        chunk_type = data[pos + 4 : pos + 8]
+        total = 12 + length
+        if pos + total > len(data):
+            break
+
+        if chunk_type == b"iTXt":
+            payload = data[pos + 8 : pos + 8 + length]
+            null_pos = payload.find(b"\x00")
+            if 0 <= null_pos <= 79 and payload[:null_pos] == keyword:
+                # keyword NUL, compression flag, compression method,
+                # language NUL, translated keyword NUL, then the text.
+                cursor = null_pos + 3
+                lang_end = payload.find(b"\x00", cursor)
+                tkw_end = payload.find(b"\x00", lang_end + 1)
+                return payload[tkw_end + 1 :].decode("utf-8")
+
+        pos += total
+
+    return None
+
+
+def _embedded_json_mp4(data: bytes) -> str | None:
+    """Return the raw genblaze uuid box payload from an MP4, or None."""
+    pos = 0
+    while pos + 8 <= len(data):
+        box_size, header_size = _read_box_size(data, pos)
+        if box_size < 8 or pos + box_size > len(data):
+            break
+
+        if data[pos + 4 : pos + 8] == b"uuid" and box_size >= header_size + 16:
+            if data[pos + header_size : pos + header_size + 16] == GENBLAZE_UUID_BYTES:
+                return data[pos + header_size + 16 : pos + box_size].decode("utf-8")
+
+        pos += box_size
+
+    return None
+
+
 _STRIPPERS = {
     "image/png": _strip_png,
     "video/mp4": _strip_mp4,
 }
+
+_EXTRACTORS = {
+    "image/png": _embedded_json_png,
+    "video/mp4": _embedded_json_mp4,
+}
+
+
+def extract_embedded_json(path: Path, mime_type: str | None = None) -> dict | None:
+    """Return the embedded genblaze block as a dict, without interpreting it.
+
+    Needed because pointer mode embeds ``{schema_version, canonical_hash,
+    manifest_uri}`` rather than a manifest. Handing that to ``parse_manifest``
+    fails, so callers need to look at the shape before deciding what it is.
+    """
+    mime = mime_type or guess_mime(path)
+    extractor = _EXTRACTORS.get(mime)
+    if extractor is None:
+        raise UnsupportedMediaError(
+            f"No extractor for {mime}. Supported: {', '.join(sorted(_EXTRACTORS))}"
+        )
+    text = extractor(path.read_bytes())
+    if text is None:
+        return None
+    return json.loads(text)
 
 
 def canonical_bytes(path: Path, mime_type: str | None = None) -> bytes:
