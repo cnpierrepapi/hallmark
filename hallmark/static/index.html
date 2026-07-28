@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HALLMARK / verify</title>
+<title>HALLMARK / provenance for generated media</title>
+<meta name="description" content="Every AI asset carries proof of how it was made, inside the file. Check any file against its own record.">
 <style>
   :root {
     --ink: #e8e4dc;
@@ -11,308 +12,675 @@
     --faint: #4a463f;
     --bg: #121110;
     --panel: #1a1917;
+    --deep: #0c0b0a;
     --rule: #2c2a26;
     --pass: #7fb069;
     --fail: #d1495b;
     --warn: #e0a458;
+    --struck: #c9a227;
     --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--ink);
     font-family: var(--mono);
     font-size: 14px;
-    line-height: 1.55;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 96px; }
+  img, video { max-width: 100%; display: block; }
 
-  header { border-bottom: 1px solid var(--rule); padding-bottom: 18px; }
-  h1 {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: 0.34em;
+  .label {
+    font-size: 10.5px;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .rule { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+  .scroller { overflow-x: auto; }
+
+  /* ---- masthead ---------------------------------------------------- */
+  .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding: 18px 5vw;
+    border-bottom: 1px solid var(--rule);
+    position: sticky;
+    top: 0;
+    background: rgba(18, 17, 16, 0.92);
+    backdrop-filter: blur(8px);
+    z-index: 20;
+  }
+  .wordmark { font-size: 13px; letter-spacing: 0.4em; text-transform: uppercase; font-weight: 600; }
+
+  /* ---- 1. hero ----------------------------------------------------- */
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 58fr) minmax(0, 42fr);
+    gap: 4vw;
+    align-items: center;
+    padding: 9vh 0 9vh 5vw;
+    border-bottom: 1px solid var(--rule);
+  }
+  .hero h1 {
+    font-family: var(--display);
+    font-size: clamp(58px, 11vw, 132px);
+    line-height: 0.86;
+    letter-spacing: -0.035em;
+    margin: 0 0 26px;
+    font-weight: 400;
+  }
+  .hero h1 em { font-style: italic; color: var(--struck); }
+  .hero .stand {
+    font-size: 16px;
+    line-height: 1.5;
+    max-width: 34ch;
+    color: var(--ink);
+    margin: 0 0 8px;
+  }
+  .hero .sub { color: var(--dim); max-width: 44ch; margin: 0 0 30px; }
+
+  .specimen { position: relative; }
+  .specimen img { border: 1px solid var(--rule); }
+  .struck {
+    position: absolute;
+    right: 14px;
+    bottom: 58px;
+    width: 74px;
+    height: 74px;
+    border: 1.5px solid var(--struck);
+    border-radius: 50%;
+    color: var(--struck);
+    display: grid;
+    place-items: center;
+    text-align: center;
+    font-size: 8.5px;
+    letter-spacing: 0.14em;
+    line-height: 1.25;
+    background: rgba(12, 11, 10, 0.74);
     text-transform: uppercase;
   }
-  .tagline { margin: 8px 0 0; color: var(--dim); max-width: 56ch; }
+  .specimen figcaption {
+    margin-top: 10px;
+    color: var(--dim);
+    font-size: 11.5px;
+    word-break: break-all;
+  }
 
-  .lede { margin: 32px 0 0; color: var(--dim); max-width: 62ch; }
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--ink);
+    color: var(--ink);
+    text-decoration: none;
+    padding: 13px 22px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-size: 11.5px;
+    transition: background .12s, color .12s;
+  }
+  .cta:hover { background: var(--ink); color: var(--bg); }
+
+  /* ---- section scaffolding ----------------------------------------- */
+  section { padding: 12vh 5vw; border-bottom: 1px solid var(--rule); }
+  .sec-head { display: flex; align-items: baseline; gap: 18px; margin-bottom: 34px; }
+  .sec-head h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: clamp(28px, 4.4vw, 46px);
+    letter-spacing: -0.02em;
+    margin: 0;
+    line-height: 1.05;
+  }
+  .sec-head .num { color: var(--struck); font-size: 11px; letter-spacing: .2em; }
+  .lede { max-width: 58ch; color: var(--dim); font-size: 15px; }
   .lede strong { color: var(--ink); font-weight: 600; }
 
+  /* ---- 2. tamper --------------------------------------------------- */
+  .tamper { background: var(--deep); padding-left: 0; padding-right: 0; }
+  .tamper .inner { padding: 0 5vw; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; margin-top: 40px; }
+  .pane { padding: 28px 5vw 34px; border-top: 3px solid var(--faint); }
+  .pane:first-child { border-right: 1px solid var(--rule); }
+  .pane.good { border-top-color: var(--pass); }
+  .pane.bad { border-top-color: var(--fail); }
+  .pane h3 {
+    font-size: clamp(22px, 3.2vw, 36px);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin: 0 0 4px;
+    font-weight: 600;
+  }
+  .pane.good h3 { color: var(--pass); }
+  .pane.bad h3 { color: var(--fail); }
+  .pane .said { color: var(--dim); min-height: 3em; }
+  .pane .hashline { margin-top: 14px; font-size: 11.5px; word-break: break-all; color: var(--faint); }
+  .pane .hashline b { color: var(--dim); font-weight: 400; }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
+  button {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--faint);
+    padding: 12px 20px;
+    cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  button:hover:not(:disabled) { border-color: var(--ink); background: #201e1b; }
+  button:disabled { opacity: .45; cursor: default; }
+
+  /* ---- 3. how it travels ------------------------------------------- */
+  .travels { display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 62fr); gap: 5vw; }
+  .travels .right { padding-top: 8vh; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--rule); }
+  .split > div { padding: 26px 24px; }
+  .split > div:first-child { border-right: 1px solid var(--rule); background: var(--panel); }
+  .split h4 { margin: 0 0 12px; font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--struck); }
+  .split ul { margin: 0; padding-left: 18px; color: var(--dim); }
+  .split li { margin-bottom: 7px; }
+  .split .yes { color: var(--ink); }
+
+  /* ---- 4. the gate ------------------------------------------------- */
+  .strip { display: flex; gap: 0; margin-top: 34px; border-top: 1px solid var(--rule); }
+  .card {
+    min-width: 268px;
+    flex: 1 0 268px;
+    padding: 22px 22px 26px;
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .card.kept { background: var(--panel); border-top: 2px solid var(--pass); margin-top: -1px; }
+  .card.lost { color: var(--faint); }
+  .card .verdict-tag {
+    font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; margin-bottom: 12px;
+  }
+  .card.kept .verdict-tag { color: var(--pass); }
+  .card.lost .verdict-tag { color: var(--dim); }
+  .card .model { color: var(--ink); font-size: 13px; margin-bottom: 3px; word-break: break-all; }
+  .card.lost .model { color: var(--dim); }
+  .card .meta { color: var(--dim); font-size: 11.5px; margin-bottom: 14px; }
+  .card .check { font-size: 11.5px; display: flex; gap: 8px; margin-bottom: 4px; }
+  .card .check .ok { color: var(--pass); }
+  .card .check .no { color: var(--fail); }
+  .card .why { margin-top: 12px; font-size: 11.5px; color: var(--warn); }
+
+  /* ---- 5. sign-off ------------------------------------------------- */
+  .signoff { text-align: center; }
+  .signoff .lede { margin: 0 auto; }
+  .stamp {
+    margin: 40px auto 0;
+    max-width: 560px;
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    padding: 30px 28px;
+    text-align: left;
+  }
+  .stamp .who { font-family: var(--display); font-size: 30px; margin: 6px 0 2px; }
+  .stamp .when { color: var(--dim); font-size: 12px; }
+  .stamp .note { margin-top: 14px; color: var(--dim); }
+  .stamp .hash { margin-top: 18px; font-size: 11.5px; word-break: break-all; color: var(--faint); }
+  .warnline { margin-top: 22px; color: var(--fail); font-size: 12.5px; }
+
+  /* ---- 6. verify --------------------------------------------------- */
+  .verify { background: var(--deep); }
   #drop {
-    margin-top: 28px;
+    margin-top: 30px;
     border: 1px dashed var(--faint);
     background: var(--panel);
-    padding: 44px 24px;
+    padding: 52px 24px;
     text-align: center;
     cursor: pointer;
     transition: border-color .12s, background .12s;
+    max-width: 720px;
   }
   #drop:hover, #drop.hot { border-color: var(--dim); background: #201e1b; }
   #drop.hot { border-style: solid; }
   #drop p { margin: 0; color: var(--dim); }
   #drop .hint { margin-top: 8px; font-size: 12px; color: var(--faint); }
   input[type=file] { display: none; }
+  .status { margin-top: 18px; color: var(--dim); }
 
-  .status { margin-top: 20px; color: var(--dim); }
-
-  .verdict {
-    margin-top: 32px;
-    border-left: 3px solid var(--faint);
-    padding: 2px 0 2px 20px;
-  }
+  .report { margin-top: 34px; max-width: 860px; }
+  .verdict { border-left: 3px solid var(--faint); padding: 2px 0 2px 20px; }
   .verdict.verified { border-color: var(--pass); }
   .verdict.altered, .verdict.broken { border-color: var(--fail); }
   .verdict.unsigned { border-color: var(--warn); }
-  .verdict h2 {
-    margin: 0;
-    font-size: 26px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    font-weight: 600;
-  }
-  .verdict.verified h2 { color: var(--pass); }
-  .verdict.altered h2, .verdict.broken h2 { color: var(--fail); }
-  .verdict.unsigned h2 { color: var(--warn); }
-  .verdict p { margin: 6px 0 0; color: var(--ink); }
+  .verdict h3 { margin: 0; font-size: 26px; letter-spacing: .18em; text-transform: uppercase; font-weight: 600; }
+  .verdict.verified h3 { color: var(--pass); }
+  .verdict.altered h3, .verdict.broken h3 { color: var(--fail); }
+  .verdict.unsigned h3 { color: var(--warn); }
+  .verdict p { margin: 6px 0 0; }
   .verdict .why { color: var(--dim); }
 
-  section { margin-top: 40px; }
-  h3 {
-    margin: 0 0 14px;
-    font-size: 11px;
-    letter-spacing: 0.24em;
-    text-transform: uppercase;
-    color: var(--dim);
-    font-weight: 600;
-    border-bottom: 1px solid var(--rule);
-    padding-bottom: 8px;
-  }
-  .row {
-    display: grid;
-    grid-template-columns: 190px 1fr;
-    gap: 16px;
-    padding: 7px 0;
-    border-bottom: 1px solid var(--rule);
-  }
-  .row:last-child { border-bottom: 0; }
-  .row dt { color: var(--dim); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+  .rows { margin-top: 28px; }
+  .row { display: grid; grid-template-columns: 190px 1fr; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
+  .row dt { color: var(--dim); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
   .row dd { margin: 0; word-break: break-all; }
-  dl { margin: 0; }
+  .hashval.match { color: var(--pass); }
+  .hashval.mismatch { color: var(--fail); }
+  .chain { margin-top: 26px; }
+  .chain .step { border-bottom: 1px solid var(--rule); padding: 13px 0; }
+  .chain .head { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+  .badge { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--rule); padding: 1px 7px; }
+  .withheld { color: var(--faint); font-style: italic; margin: 8px 0 0; }
 
-  .hash { font-size: 12.5px; }
-  .hash.match { color: var(--pass); }
-  .hash.mismatch { color: var(--fail); }
+  /* ---- 7. ledger --------------------------------------------------- */
+  table { width: 100%; border-collapse: collapse; margin-top: 30px; font-size: 13px; }
+  th, td { text-align: left; padding: 11px 16px 11px 0; border-bottom: 1px solid var(--rule); }
+  th { font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); font-weight: 400; }
+  td.num { color: var(--dim); }
 
-  .step { border-bottom: 1px solid var(--rule); padding: 14px 0; }
-  .step:last-child { border-bottom: 0; }
-  .step .head { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
-  .step .model { font-weight: 600; }
-  .badge {
-    font-size: 10.5px;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-    color: var(--dim);
-    border: 1px solid var(--rule);
-    padding: 1px 7px;
-  }
-  .prompt { margin: 9px 0 0; color: var(--dim); white-space: pre-wrap; }
-  .withheld { color: var(--faint); font-style: italic; }
-
-  .scroller { overflow-x: auto; }
-  footer { margin-top: 64px; border-top: 1px solid var(--rule); padding-top: 16px; color: var(--faint); font-size: 12px; }
+  /* ---- footer ------------------------------------------------------ */
+  footer { padding: 8vh 5vw; color: var(--faint); font-size: 12.5px; }
+  footer .note { max-width: 66ch; }
+  footer a { color: var(--dim); }
   .hidden { display: none; }
 
-  @media (max-width: 620px) {
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; padding: 7vh 5vw; gap: 40px; }
+    .travels { grid-template-columns: 1fr; }
+    .travels .right { padding-top: 0; }
+    .panes { grid-template-columns: 1fr; }
+    .pane:first-child { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .split { grid-template-columns: 1fr; }
+    .split > div:first-child { border-right: 0; border-bottom: 1px solid var(--rule); }
     .row { grid-template-columns: 1fr; gap: 2px; }
-    .verdict h2 { font-size: 21px; }
   }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-<header>
-  <h1>Hallmark</h1>
-  <p class="tagline">Provenance for generated media. Checked against the file itself.</p>
-</header>
-
-<p class="lede">
-  Drop in an image or video. If it was made through Hallmark it carries a record of
-  how it was generated, stamped into the file. This page reads that record and
-  confirms whether <strong>the media still matches it</strong>.
-  Nothing is stored, and no account is needed.
-</p>
-
-<div id="drop" tabindex="0" role="button" aria-label="Choose a file to verify">
-  <p>Drop a file here, or click to choose</p>
-  <p class="hint">PNG and MP4, up to 200MB</p>
+<div class="masthead">
+  <span class="wordmark">Hallmark</span>
+  <span class="label" id="mastRun">assay / specimen</span>
 </div>
-<input type="file" id="picker" accept="image/png,video/mp4">
 
-<p class="status hidden" id="status"></p>
-
-<div id="result" class="hidden">
-
-  <div class="verdict" id="verdict">
-    <h2 id="verdictLabel"></h2>
-    <p id="verdictSummary"></p>
-    <p class="why hidden" id="verdictWhy"></p>
+<!-- 1. HERO ------------------------------------------------------------ -->
+<div class="hero">
+  <div>
+    <h1>Prove<br>it<em>.</em></h1>
+    <p class="stand">Every asset this pipeline makes carries a record of how it was made, struck into the file itself.</p>
+    <p class="sub">Not a badge in a footer. A hash you can check against the bytes, on a file you already downloaded, without an account and without asking us.</p>
+    <a class="cta" href="#verify">Check a file <span aria-hidden="true">&rarr;</span></a>
   </div>
-
-  <section>
-    <h3>Integrity</h3>
-    <dl>
-      <div class="row"><dt>File</dt><dd id="fFilename"></dd></div>
-      <div class="row"><dt>Type</dt><dd id="fType"></dd></div>
-      <div class="row"><dt>Hash now</dt><dd id="fComputed" class="hash"></dd></div>
-      <div class="row"><dt>Hash recorded</dt><dd id="fDeclared" class="hash"></dd></div>
-      <div class="row"><dt>Record found in</dt><dd id="fSource"></dd></div>
-    </dl>
-  </section>
-
-  <section id="chainSection">
-    <h3>How it was made</h3>
-    <div id="chain"></div>
-  </section>
-
-  <section>
-    <h3>Record</h3>
-    <dl>
-      <div class="row"><dt>Run</dt><dd id="fRun"></dd></div>
-      <div class="row"><dt>Generated</dt><dd id="fCreated"></dd></div>
-      <div class="row"><dt>Record hash</dt><dd id="fCanonical" class="hash"></dd></div>
-      <div class="row"><dt>Schema</dt><dd id="fSchema"></dd></div>
-    </dl>
-  </section>
-
+  <figure class="specimen" style="margin:0">
+    <img id="heroImg" alt="A generated campaign image carrying a provenance record" loading="lazy">
+    <span class="struck">Struck<br>&#10711;<br>Hallmark</span>
+    <figcaption id="heroCap">loading specimen</figcaption>
+  </figure>
 </div>
+
+<!-- 2. TAMPER ---------------------------------------------------------- -->
+<section class="tamper">
+  <div class="inner">
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>Change one pixel. Watch it fail.</h2>
+    </div>
+    <p class="lede">Both panels below run against the live checker, on the real specimen. The left one is the file as published. The right one is the same file with a single byte changed. <strong>The record stays valid in both. Only one still matches the media.</strong></p>
+    <div class="actions">
+      <button id="btnOriginal">Check the original</button>
+      <button id="btnAlter">Alter one byte, then check</button>
+    </div>
+  </div>
+  <div class="panes">
+    <div class="pane good" id="paneGood">
+      <div class="label">As published</div>
+      <h3 id="goodVerdict">not run</h3>
+      <p class="said" id="goodSaid">Press "check the original" to run it.</p>
+      <div class="hashline"><b>hash now</b> <span id="goodHash">-</span></div>
+    </div>
+    <div class="pane bad" id="paneBad">
+      <div class="label">One byte changed</div>
+      <h3 id="badVerdict">not run</h3>
+      <p class="said" id="badSaid">Press "alter one byte" to run it.</p>
+      <div class="hashline"><b>hash now</b> <span id="badHash">-</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. HOW IT TRAVELS -------------------------------------------------- -->
+<section>
+  <div class="travels">
+    <div class="left">
+      <div class="sec-head">
+        <span class="num">02</span>
+        <h2>Public proof. Private prompts.</h2>
+      </div>
+      <p class="lede">Agencies need to disclose that an asset is AI generated. They do not need to hand over the prompt, the seed and the parameters that produced it. That is the creative work.</p>
+      <p class="lede" style="margin-top:16px">So the file carries only a hash and a reference. The full record sits in private storage on Backblaze B2. Anyone can check the file. Only you can read the brief behind it.</p>
+    </div>
+    <div class="right">
+      <div class="split">
+        <div>
+          <h4>Struck into the file</h4>
+          <ul>
+            <li class="yes">Content hash</li>
+            <li class="yes">Record reference</li>
+            <li class="yes">Schema version</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Held in private storage</h4>
+          <ul>
+            <li>The prompt</li>
+            <li>The seed and parameters</li>
+            <li>Model and provider</li>
+            <li>Who signed it off</li>
+          </ul>
+        </div>
+      </div>
+      <p class="lede" style="margin-top:20px;font-size:13px">A pointer names its own record, so a forger could aim it at a record that fits their edited file. The checker binds the record back to the hash struck into the media, and rejects it when they disagree.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4. THE GATE -------------------------------------------------------- -->
+<section>
+  <div class="sec-head">
+    <span class="num">03</span>
+    <h2>Nothing ships on the first try.</h2>
+  </div>
+  <p class="lede">Generation is a slot machine. Assets are made more than once, checked, and the losing attempts are kept rather than binned. These are the real attempts behind the specimen above, with the reasons they were kept or dropped.</p>
+  <div class="scroller">
+    <div class="strip" id="strip"></div>
+  </div>
+  <p class="lede" style="margin-top:24px;font-size:13px">The checks are deterministic on purpose: blank frames, video with no media data, audio cut short of its script. A machine can prove those. It cannot prove taste, so it does not pretend to.</p>
+</section>
+
+<!-- 5. SIGN-OFF -------------------------------------------------------- -->
+<section class="signoff">
+  <div class="sec-head" style="justify-content:center">
+    <span class="num">04</span>
+    <h2>Signed by a person.</h2>
+  </div>
+  <p class="lede">A model made it. Someone still has to clear it. The sign-off is written into the record before the hash is taken, so it cannot be added or edited afterwards.</p>
+  <div class="stamp">
+    <div class="label">Approved by</div>
+    <div class="who" id="apprWho">-</div>
+    <div class="when" id="apprWhen">-</div>
+    <p class="note" id="apprNote"></p>
+    <div class="hash"><span class="label">record hash</span><br><span id="apprHash">-</span></div>
+    <p class="warnline">Change the name and the hash no longer matches. The file stops verifying.</p>
+  </div>
+</section>
+
+<!-- 6. VERIFY ---------------------------------------------------------- -->
+<section class="verify" id="verify">
+  <div class="sec-head">
+    <span class="num">05</span>
+    <h2>Check any file.</h2>
+  </div>
+  <p class="lede">Drop in a PNG, MP4 or MP3. If it carries a record, you get the chain that made it and a straight answer on whether the media still matches. Nothing is stored.</p>
+
+  <div id="drop" tabindex="0" role="button" aria-label="Choose a file to verify">
+    <p>Drop a file here, or click to choose</p>
+    <p class="hint">PNG, MP4 and MP3, up to 200MB</p>
+  </div>
+  <input type="file" id="picker" accept="image/png,video/mp4,audio/mpeg">
+  <p class="status hidden" id="status"></p>
+
+  <div class="report hidden" id="report">
+    <div class="verdict" id="verdict">
+      <h3 id="vLabel"></h3>
+      <p id="vSummary"></p>
+      <p class="why hidden" id="vWhy"></p>
+    </div>
+    <dl class="rows">
+      <div class="row"><dt>File</dt><dd id="fName"></dd></div>
+      <div class="row"><dt>Type</dt><dd id="fType"></dd></div>
+      <div class="row"><dt>Hash now</dt><dd id="fNow" class="hashval"></dd></div>
+      <div class="row"><dt>Hash recorded</dt><dd id="fRec" class="hashval"></dd></div>
+      <div class="row"><dt>Record found in</dt><dd id="fSrc"></dd></div>
+      <div class="row"><dt>Generated</dt><dd id="fWhen"></dd></div>
+    </dl>
+    <div class="chain" id="chain"></div>
+  </div>
+</section>
+
+<!-- 7. LEDGER ---------------------------------------------------------- -->
+<section>
+  <div class="sec-head">
+    <span class="num">06</span>
+    <h2>What it actually costs.</h2>
+  </div>
+  <p class="lede">Every attempt is written to a Parquet ledger on B2, accepted or not. Throw the failures away and nobody can tell you an acceptance rate, or what a usable asset really costs once the rejects are counted.</p>
+  <div class="scroller">
+    <table>
+      <thead>
+        <tr><th>Modality</th><th>Model</th><th>Attempts</th><th>Accepted</th><th>Rate</th><th>Avg latency</th></tr>
+      </thead>
+      <tbody id="ledgerBody"></tbody>
+    </table>
+  </div>
+</section>
 
 <footer>
-  Verification runs on the bytes you supply. A file whose record is valid but whose
-  pixels have changed will fail, which is the point.
+  <p class="note">From 2 August 2026, providers of systems that generate synthetic audio, image, video or text must mark those outputs in a machine readable way under Article 50 of the EU AI Act, and deployers of deepfakes must disclose them. A line of small print is not a mark, and it does not survive a re-upload.</p>
+  <p class="note" style="margin-top:18px">Built on Genblaze and Backblaze B2. Media generated through GMI Cloud. <a href="/health">status</a></p>
 </footer>
 
-</div>
-
 <script>
-const drop = document.getElementById('drop');
-const picker = document.getElementById('picker');
-const statusEl = document.getElementById('status');
-const result = document.getElementById('result');
-
 const el = id => document.getElementById(id);
-const text = (id, value) => { el(id).textContent = (value === null || value === undefined || value === '') ? '-' : value; };
+const set = (id, v) => { el(id).textContent = (v === null || v === undefined || v === '') ? '-' : v; };
+
+let SHOW = null;
+
+async function boot() {
+  try {
+    const res = await fetch('/api/showcase');
+    SHOW = await res.json();
+  } catch (e) {
+    return;
+  }
+  if (!SHOW || SHOW.error) return;
+
+  const img = SHOW.specimens.find(s => s.modality === 'image');
+  if (img) {
+    el('heroImg').src = '/api/specimen/image';
+    el('heroCap').textContent = `${img.model} · sha256 ${(img.sha256 || '').slice(0, 32)}...`;
+  }
+  set('mastRun', `assay / ${(SHOW.run_id || '').slice(0, 8)}`);
+
+  const a = SHOW.approval || {};
+  set('apprWho', a.approver);
+  set('apprWhen', a.approved_at ? new Date(a.approved_at).toUTCString() : null);
+  el('apprNote').textContent = a.note ? `"${a.note}"` : '';
+  set('apprHash', SHOW.canonical_hash);
+
+  renderStrip(SHOW.attempts || []);
+  renderLedger(SHOW.ledger || []);
+}
+
+function renderStrip(attempts) {
+  const strip = el('strip');
+  strip.innerHTML = '';
+  attempts.forEach(at => {
+    const card = document.createElement('div');
+    card.className = 'card ' + (at.accepted ? 'kept' : 'lost');
+
+    const tag = document.createElement('div');
+    tag.className = 'verdict-tag';
+    tag.textContent = at.accepted ? 'kept' : 'not used';
+    card.appendChild(tag);
+
+    const model = document.createElement('div');
+    model.className = 'model';
+    model.textContent = at.model;
+    card.appendChild(model);
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = `${at.modality} · ${at.latency_seconds}s · ${Math.round(at.size_bytes / 1024)}KB · score ${at.score}`;
+    card.appendChild(meta);
+
+    (at.checks || []).forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'check';
+      const mark = document.createElement('span');
+      mark.className = c.passed ? 'ok' : 'no';
+      mark.textContent = c.passed ? '+' : '×';
+      const text = document.createElement('span');
+      text.textContent = `${c.name} ${c.detail}`;
+      row.appendChild(mark); row.appendChild(text);
+      card.appendChild(row);
+    });
+
+    if (at.reject_reason) {
+      const why = document.createElement('div');
+      why.className = 'why';
+      why.textContent = at.reject_reason;
+      card.appendChild(why);
+    }
+    strip.appendChild(card);
+  });
+}
+
+function renderLedger(rows) {
+  const body = el('ledgerBody');
+  body.innerHTML = '';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    [r.modality, r.model, r.attempts, r.accepted, r.acceptance_rate, r.avg_latency_seconds + 's']
+      .forEach((cell, i) => {
+        const td = document.createElement('td');
+        if (i >= 2) td.className = 'num';
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+    body.appendChild(tr);
+  });
+}
+
+/* ---- tamper demo, run live against the real checker ----------------- */
+async function checkSpecimen(mutate, ids) {
+  const [vId, sId, hId] = ids;
+  set(vId, 'checking');
+  set(sId, '');
+  set(hId, '-');
+
+  const res = await fetch('/api/specimen/image');
+  let bytes = new Uint8Array(await res.arrayBuffer());
+
+  if (mutate) {
+    bytes = bytes.slice();
+    // Flip a byte late in the file, inside the image data. The record sits
+    // near the start, so it stays readable and stays valid. That is the
+    // point: a good record on media that no longer matches it.
+    const at = Math.floor(bytes.length * 0.8);
+    bytes[at] = bytes[at] ^ 0xff;
+  }
+
+  const body = new FormData();
+  body.append('file', new Blob([bytes], { type: 'image/png' }), 'specimen.png');
+  const out = await fetch('/api/verify', { method: 'POST', body });
+  const data = await out.json();
+
+  set(vId, data.verdict);
+  set(sId, data.reason || data.summary);
+  set(hId, data.computed_sha256 || '-');
+  return data;
+}
+
+el('btnOriginal').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  try { await checkSpecimen(false, ['goodVerdict', 'goodSaid', 'goodHash']); }
+  catch (err) { set('goodVerdict', 'error'); set('goodSaid', err.message); }
+  e.target.disabled = false;
+});
+
+el('btnAlter').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  try { await checkSpecimen(true, ['badVerdict', 'badSaid', 'badHash']); }
+  catch (err) { set('badVerdict', 'error'); set('badSaid', err.message); }
+  e.target.disabled = false;
+});
+
+/* ---- verify box ------------------------------------------------------ */
+const drop = el('drop'), picker = el('picker'), statusEl = el('status'), report = el('report');
 
 drop.addEventListener('click', () => picker.click());
 drop.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); }
 });
 picker.addEventListener('change', () => { if (picker.files[0]) send(picker.files[0]); });
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) send(f); });
 
-['dragenter', 'dragover'].forEach(evt =>
-  drop.addEventListener(evt, e => { e.preventDefault(); drop.classList.add('hot'); }));
-['dragleave', 'drop'].forEach(evt =>
-  drop.addEventListener(evt, e => { e.preventDefault(); drop.classList.remove('hot'); }));
-drop.addEventListener('drop', e => {
-  const file = e.dataTransfer.files[0];
-  if (file) send(file);
-});
-
-function setStatus(message) {
-  statusEl.textContent = message;
-  statusEl.classList.toggle('hidden', !message);
-}
+function say(msg) { statusEl.textContent = msg; statusEl.classList.toggle('hidden', !msg); }
 
 async function send(file) {
-  result.classList.add('hidden');
-  setStatus(`Checking ${file.name} ...`);
-
+  report.classList.add('hidden');
+  say(`Checking ${file.name} ...`);
   const body = new FormData();
   body.append('file', file);
-
   try {
-    const response = await fetch('/api/verify', { method: 'POST', body });
-    const data = await response.json();
-    if (!response.ok) {
-      setStatus(data.detail || `Verification failed (${response.status})`);
-      return;
-    }
-    setStatus('');
+    const res = await fetch('/api/verify', { method: 'POST', body });
+    const data = await res.json();
+    if (!res.ok) { say(data.detail || `Check failed (${res.status})`); return; }
+    say('');
     render(data);
   } catch (err) {
-    setStatus(`Could not reach the verifier: ${err.message}`);
+    say(`Could not reach the checker: ${err.message}`);
   }
 }
 
 function render(d) {
-  const verdict = el('verdict');
-  verdict.className = 'verdict ' + d.verdict;
-  text('verdictLabel', d.verdict);
-  text('verdictSummary', d.summary);
-
-  const why = el('verdictWhy');
+  el('verdict').className = 'verdict ' + d.verdict;
+  set('vLabel', d.verdict);
+  set('vSummary', d.summary);
+  const why = el('vWhy');
   why.textContent = d.reason || '';
   why.classList.toggle('hidden', !d.reason);
 
-  text('fFilename', d.filename);
-  text('fType', d.media_type);
-  text('fSource', d.manifest_source === 'none' ? 'nothing found' : d.manifest_source);
+  set('fName', d.filename);
+  set('fType', d.media_type);
+  set('fSrc', d.manifest_source === 'none' ? 'nothing found' : d.manifest_source);
+  set('fWhen', d.created_at ? new Date(d.created_at).toUTCString() : null);
 
   const match = d.declared_sha256 && d.computed_sha256 === d.declared_sha256;
-  const cls = d.declared_sha256 ? (match ? 'hash match' : 'hash mismatch') : 'hash';
-  el('fComputed').className = cls;
-  el('fDeclared').className = cls;
-  text('fComputed', d.computed_sha256);
-  text('fDeclared', d.declared_sha256);
-
-  text('fRun', d.run_name ? `${d.run_name} (${d.run_id})` : d.run_id);
-  text('fCreated', d.created_at ? new Date(d.created_at).toLocaleString() : null);
-  text('fCanonical', d.canonical_hash);
-  text('fSchema', d.schema_version);
+  const cls = 'hashval ' + (d.declared_sha256 ? (match ? 'match' : 'mismatch') : '');
+  el('fNow').className = cls; el('fRec').className = cls;
+  set('fNow', d.computed_sha256);
+  set('fRec', d.declared_sha256);
 
   const chain = el('chain');
   chain.innerHTML = '';
-  el('chainSection').classList.toggle('hidden', !d.steps || d.steps.length === 0);
-
-  (d.steps || []).forEach(step => {
-    const node = document.createElement('div');
-    node.className = 'step';
-
+  (d.steps || []).forEach(s => {
+    const step = document.createElement('div');
+    step.className = 'step';
     const head = document.createElement('div');
     head.className = 'head';
-
-    const model = document.createElement('span');
-    model.className = 'model';
-    model.textContent = step.model;
-    head.appendChild(model);
-
-    [step.provider, step.modality, step.step_type].filter(Boolean).forEach(label => {
-      const badge = document.createElement('span');
-      badge.className = 'badge';
-      badge.textContent = label;
-      head.appendChild(badge);
+    const m = document.createElement('span');
+    m.textContent = s.model;
+    head.appendChild(m);
+    [s.provider, s.modality, s.step_type].filter(Boolean).forEach(t => {
+      const b = document.createElement('span');
+      b.className = 'badge'; b.textContent = t; head.appendChild(b);
     });
-    node.appendChild(head);
-
-    const prompt = document.createElement('p');
-    if (step.prompt_withheld) {
-      prompt.className = 'prompt withheld';
-      prompt.textContent = 'Prompt withheld by the publisher.';
-    } else {
-      prompt.className = 'prompt';
-      prompt.textContent = step.prompt || '';
-    }
-    node.appendChild(prompt);
-
-    chain.appendChild(node);
+    step.appendChild(head);
+    const p = document.createElement('p');
+    if (s.prompt_withheld) { p.className = 'withheld'; p.textContent = 'Prompt withheld by the publisher.'; }
+    else { p.textContent = s.prompt || ''; }
+    step.appendChild(p);
+    chain.appendChild(step);
   });
 
-  result.classList.remove('hidden');
+  report.classList.remove('hidden');
 }
+
+boot();
 </script>
 </body>
 </html>

@@ -7,13 +7,14 @@ the ones with no relationship to whoever made it.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from hallmark.verify import verify
 
@@ -32,6 +33,61 @@ app = FastAPI(
     description="Verify how a piece of media was generated.",
     version="0.1.0",
 )
+
+
+SHOWCASE_KEY = "showcase/current.json"
+_showcase_cache: dict[str, object] | None = None
+
+
+def _showcase() -> dict:
+    """Read the published showcase payload, cached for the process lifetime.
+
+    Built offline by scripts/publish_showcase.py, so this never touches the
+    ledger or pyarrow and the deployed function stays small.
+    """
+    global _showcase_cache
+    if _showcase_cache is None:
+        from hallmark import storage
+
+        body = storage.client().get_object(Bucket=storage.bucket(), Key=SHOWCASE_KEY)["Body"].read()
+        _showcase_cache = json.loads(body)
+    return _showcase_cache
+
+
+@app.get("/api/showcase")
+def showcase() -> JSONResponse:
+    """Public data for the homepage. Contains no prompts by construction."""
+    try:
+        return JSONResponse(_showcase())
+    except Exception as exc:  # noqa: BLE001 - the page degrades rather than breaks
+        return JSONResponse({"error": str(exc), "specimens": [], "attempts": []}, status_code=503)
+
+
+@app.get("/api/specimen/{modality}")
+def specimen(modality: str) -> StreamingResponse:
+    """Stream a stamped specimen from the private bucket.
+
+    Proxied rather than linked, because the bucket stays private and the point
+    of the page is that a visitor can download the real stamped file and check
+    it themselves.
+    """
+    from hallmark import storage
+
+    entry = next((s for s in _showcase().get("specimens", []) if s["modality"] == modality), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No specimen for {modality}")
+
+    obj = storage.client().get_object(Bucket=storage.bucket(), Key=entry["key"])
+    filename = Path(entry["key"]).name
+
+    return StreamingResponse(
+        obj["Body"].iter_chunks(CHUNK_BYTES),
+        media_type=entry["media_type"],
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 
 @app.get("/health")
