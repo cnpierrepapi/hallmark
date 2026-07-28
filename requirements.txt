@@ -7,6 +7,10 @@ genblaze-s3==0.3.6
 # Required to read and strip ID3 tags when verifying audio. genblaze treats
 # this as optional, but audio verification is not optional for us.
 mutagen==1.48.1
+# Ledger analytics. pyarrow needs an IANA timezone database to read back
+# timezone-aware timestamps, which Windows does not ship with Python.
+pyarrow==25.0.0
+tzdata==2025.2
 fastapi==0.140.7
 python-multipart==0.0.20
 python-dotenv==1.0.1
