@@ -179,6 +179,89 @@
   button:hover:not(:disabled) { border-color: var(--ink); background: #201e1b; }
   button:disabled { opacity: .45; cursor: default; }
 
+  /* ---- gallery ------------------------------------------------------ */
+  .gallery { padding-left: 0; padding-right: 0; }
+  .gallery .sec-head, .gallery .lede { padding-left: 5vw; padding-right: 5vw; }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--rule);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    margin-top: 36px;
+  }
+  .tile {
+    position: relative;
+    background: var(--deep);
+    cursor: pointer;
+    overflow: hidden;
+    aspect-ratio: 1 / 1;
+  }
+  .tile img {
+    width: 100%; height: 100%; object-fit: cover;
+    transition: transform .5s cubic-bezier(.2,.7,.3,1), filter .3s;
+  }
+  .tile:hover img { transform: scale(1.045); filter: saturate(1.12); }
+  .tile .cap {
+    position: absolute; inset: auto 0 0 0;
+    padding: 14px 14px 12px;
+    background: linear-gradient(to top, rgba(12,11,10,.94), rgba(12,11,10,0));
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 8px;
+  }
+  .tile .name { font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; }
+  .tile .tick {
+    font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+    border: 1px solid var(--faint); padding: 2px 7px; color: var(--dim); white-space: nowrap;
+  }
+  .tile.checking .tick { border-color: var(--warn); color: var(--warn); }
+  .tile.verified .tick { border-color: var(--pass); color: var(--pass); }
+  .tile.failed .tick { border-color: var(--fail); color: var(--fail); }
+  /* ---- proof bubbles ------------------------------------------------ */
+  /* Hovering an asset lifts its provenance off the surface. Pointer events
+     are off so the bubbles never block the click that verifies the tile. */
+  .bubbles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .bubble {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 13px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    white-space: nowrap;
+    color: var(--ink);
+    background: rgba(18, 17, 16, .72);
+    border: 1px solid rgba(232, 228, 220, .22);
+    backdrop-filter: blur(7px);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .12);
+    opacity: 0;
+    animation: rise 2.6s cubic-bezier(.22,.7,.3,1) forwards;
+  }
+  .bubble .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--struck);
+    box-shadow: 0 0 8px var(--struck);
+  }
+  .bubble.ok { border-color: rgba(127, 176, 105, .5); }
+  .bubble.ok .dot { background: var(--pass); box-shadow: 0 0 8px var(--pass); }
+  .bubble.mono { font-family: var(--mono); color: var(--dim); }
+
+  @keyframes rise {
+    0%   { opacity: 0; transform: translate3d(0, 26px, 0) scale(.84); }
+    18%  { opacity: 1; transform: translate3d(0, 6px, 0) scale(1); }
+    72%  { opacity: 1; }
+    100% { opacity: 0; transform: translate3d(var(--drift, 8px), -78px, 0) scale(1.02); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bubble { animation: fade 2.6s linear forwards; }
+    @keyframes fade { 0%,100% { opacity: 0 } 20%,70% { opacity: 1 } }
+  }
+
+  @media (max-width: 900px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+
   /* ---- 3. how it travels ------------------------------------------- */
   .travels { display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 62fr); gap: 5vw; }
   .travels .right { padding-top: 8vh; }
@@ -313,18 +396,30 @@
     <p class="sub">Not a badge in a footer. A hash you can check against the bytes, on a file you already downloaded, without an account and without asking us.</p>
     <a class="cta" href="#verify">Check a file <span aria-hidden="true">&rarr;</span></a>
   </div>
-  <figure class="specimen" style="margin:0">
-    <img id="heroImg" alt="A generated campaign image carrying a provenance record" loading="lazy">
+  <figure class="specimen" id="heroFig" style="margin:0" tabindex="0">
+    <img id="heroImg" alt="A generated asset carrying a provenance record" loading="lazy">
+    <div class="bubbles" id="heroBubbles"></div>
     <span class="struck">Struck<br>&#10711;<br>Hallmark</span>
     <figcaption id="heroCap">loading specimen</figcaption>
   </figure>
 </div>
 
-<!-- 2. TAMPER ---------------------------------------------------------- -->
+<!-- 2. GALLERY --------------------------------------------------------- -->
+<section class="gallery">
+  <div class="sec-head">
+    <span class="num">01</span>
+    <h2>Made here. Every one of them provable.</h2>
+  </div>
+  <p class="lede">These were all generated through the pipeline, checked, signed off and struck. None of them are stock art. <strong>Click any tile to check it against its own record, live.</strong></p>
+  <div class="tiles" id="tiles"></div>
+  <p class="lede" style="margin-top:26px;font-size:13px">Download one and open it anywhere. The record travels inside the file, so it still checks out after a re-upload.</p>
+</section>
+
+<!-- 3. TAMPER ---------------------------------------------------------- -->
 <section class="tamper">
   <div class="inner">
     <div class="sec-head">
-      <span class="num">01</span>
+      <span class="num">02</span>
       <h2>Change one pixel. Watch it fail.</h2>
     </div>
     <p class="lede">Both panels below run against the live checker, on the real specimen. The left one is the file as published. The right one is the same file with a single byte changed. <strong>The record stays valid in both. Only one still matches the media.</strong></p>
@@ -354,7 +449,7 @@
   <div class="travels">
     <div class="left">
       <div class="sec-head">
-        <span class="num">02</span>
+        <span class="num">03</span>
         <h2>Public proof. Private prompts.</h2>
       </div>
       <p class="lede">Agencies need to disclose that an asset is AI generated. They do not need to hand over the prompt, the seed and the parameters that produced it. That is the creative work.</p>
@@ -388,7 +483,7 @@
 <!-- 4. THE GATE -------------------------------------------------------- -->
 <section>
   <div class="sec-head">
-    <span class="num">03</span>
+    <span class="num">04</span>
     <h2>Nothing ships on the first try.</h2>
   </div>
   <p class="lede">Generation is a slot machine. Assets are made more than once, checked, and the losing attempts are kept rather than binned. These are the real attempts behind the specimen above, with the reasons they were kept or dropped.</p>
@@ -401,7 +496,7 @@
 <!-- 5. SIGN-OFF -------------------------------------------------------- -->
 <section class="signoff">
   <div class="sec-head" style="justify-content:center">
-    <span class="num">04</span>
+    <span class="num">05</span>
     <h2>Signed by a person.</h2>
   </div>
   <p class="lede">A model made it. Someone still has to clear it. The sign-off is written into the record before the hash is taken, so it cannot be added or edited afterwards.</p>
@@ -418,7 +513,7 @@
 <!-- 6. VERIFY ---------------------------------------------------------- -->
 <section class="verify" id="verify">
   <div class="sec-head">
-    <span class="num">05</span>
+    <span class="num">06</span>
     <h2>Check any file.</h2>
   </div>
   <p class="lede">Drop in a PNG, MP4 or MP3. If it carries a record, you get the chain that made it and a straight answer on whether the media still matches. Nothing is stored.</p>
@@ -451,7 +546,7 @@
 <!-- 7. LEDGER ---------------------------------------------------------- -->
 <section>
   <div class="sec-head">
-    <span class="num">06</span>
+    <span class="num">07</span>
     <h2>What it actually costs.</h2>
   </div>
   <p class="lede">Every attempt is written to a Parquet ledger on B2, accepted or not. Throw the failures away and nobody can tell you an acceptance rate, or what a usable asset really costs once the rejects are counted.</p>
@@ -475,6 +570,9 @@ const el = id => document.getElementById(id);
 const set = (id, v) => { el(id).textContent = (v === null || v === undefined || v === '') ? '-' : v; };
 
 let SHOW = null;
+// The hero and the tamper demo run against whichever asset is on show, so
+// they stay in step when the gallery is regenerated.
+let HERO_SRC = '/api/specimen/image';
 
 async function boot() {
   try {
@@ -485,11 +583,27 @@ async function boot() {
   }
   if (!SHOW || SHOW.error) return;
 
+  const tiles = SHOW.gallery || [];
+  const hero = tiles.find(t => t.slug === 'horse-iridescent') || tiles[0];
   const img = SHOW.specimens.find(s => s.modality === 'image');
-  if (img) {
-    el('heroImg').src = '/api/specimen/image';
+
+  if (hero) {
+    HERO_SRC = `/api/gallery/${hero.slug}`;
+    el('heroImg').src = HERO_SRC;
+    el('heroCap').textContent = `${hero.title} · ${hero.model} · sha256 ${(hero.sha256 || '').slice(0, 32)}...`;
+    attachBubbles(el('heroFig'), el('heroBubbles'), [
+      { text: 'record found', ok: true },
+      { text: hero.model, mono: true },
+      { text: `sha ${(hero.sha256 || '').slice(0, 12)}`, mono: true },
+      { text: 'prompt withheld', mono: true },
+      { text: `signed ${(SHOW.approval || {}).approver || 'studio'}`, ok: true },
+    ]);
+  } else if (img) {
+    el('heroImg').src = HERO_SRC;
     el('heroCap').textContent = `${img.model} · sha256 ${(img.sha256 || '').slice(0, 32)}...`;
   }
+
+  renderTiles(tiles);
   set('mastRun', `assay / ${(SHOW.run_id || '').slice(0, 8)}`);
 
   const a = SHOW.approval || {};
@@ -500,6 +614,118 @@ async function boot() {
 
   renderStrip(SHOW.attempts || []);
   renderLedger(SHOW.ledger || []);
+}
+
+/* Float the provenance off an asset while the pointer is over it.
+   Spawning is throttled and every bubble removes itself, so a long hover
+   cannot pile up nodes. */
+function attachBubbles(host, layer, facts) {
+  let timer = null;
+  let index = 0;
+
+  const pop = () => {
+    const fact = facts[index % facts.length];
+    index += 1;
+
+    const bubble = document.createElement('span');
+    bubble.className = 'bubble' + (fact.ok ? ' ok' : '') + (fact.mono ? ' mono' : '');
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    bubble.appendChild(dot);
+    bubble.appendChild(document.createTextNode(fact.text));
+
+    bubble.style.left = (10 + Math.random() * 42) + '%';
+    bubble.style.bottom = (16 + Math.random() * 26) + '%';
+    bubble.style.setProperty('--drift', (Math.random() * 44 - 22).toFixed(0) + 'px');
+    bubble.style.animationDelay = (Math.random() * 0.12).toFixed(2) + 's';
+
+    bubble.addEventListener('animationend', () => bubble.remove());
+    layer.appendChild(bubble);
+  };
+
+  const start = () => {
+    if (timer) return;
+    pop();
+    timer = setInterval(pop, 620);
+  };
+  const stop = () => {
+    clearInterval(timer);
+    timer = null;
+  };
+
+  host.addEventListener('mouseenter', start);
+  host.addEventListener('mouseleave', stop);
+  host.addEventListener('focus', start);
+  host.addEventListener('blur', stop);
+}
+
+function renderTiles(tiles) {
+  const wrap = el('tiles');
+  wrap.innerHTML = '';
+
+  tiles.forEach(t => {
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.tabIndex = 0;
+    tile.setAttribute('role', 'button');
+    tile.setAttribute('aria-label', `Check ${t.title} against its record`);
+
+    const img = document.createElement('img');
+    img.src = `/api/gallery/${t.slug}`;
+    img.alt = t.title;
+    img.loading = 'lazy';
+    tile.appendChild(img);
+
+    const bubbles = document.createElement('div');
+    bubbles.className = 'bubbles';
+    tile.appendChild(bubbles);
+
+    const proof = [
+      { text: 'record found', ok: true },
+      { text: t.model, mono: true },
+      { text: `sha ${(t.sha256 || '').slice(0, 12)}`, mono: true },
+      { text: `signed ${(SHOW.approval || {}).approver || 'studio'}`, ok: true },
+    ];
+    attachBubbles(tile, bubbles, proof);
+
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = t.title;
+    const tick = document.createElement('span');
+    tick.className = 'tick';
+    tick.textContent = 'check it';
+    cap.appendChild(name);
+    cap.appendChild(tick);
+    tile.appendChild(cap);
+
+    const run = async () => {
+      if (tile.classList.contains('checking')) return;
+      tile.className = 'tile checking';
+      tick.textContent = 'checking';
+      try {
+        const bytes = await (await fetch(`/api/gallery/${t.slug}`)).blob();
+        const body = new FormData();
+        body.append('file', bytes, `${t.slug}.png`);
+        const data = await (await fetch('/api/verify', { method: 'POST', body })).json();
+        const ok = data.verdict === 'verified';
+        tile.className = 'tile ' + (ok ? 'verified' : 'failed');
+        tick.textContent = data.verdict;
+      } catch (err) {
+        tile.className = 'tile failed';
+        tick.textContent = 'error';
+      }
+    };
+
+    tile.addEventListener('click', run);
+    tile.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(); }
+    });
+
+    wrap.appendChild(tile);
+  });
 }
 
 function renderStrip(attempts) {
@@ -569,7 +795,7 @@ async function checkSpecimen(mutate, ids) {
   set(sId, '');
   set(hId, '-');
 
-  const res = await fetch('/api/specimen/image');
+  const res = await fetch(HERO_SRC);
   let bytes = new Uint8Array(await res.arrayBuffer());
 
   if (mutate) {

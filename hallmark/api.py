@@ -63,9 +63,8 @@ def showcase() -> JSONResponse:
         return JSONResponse({"error": str(exc), "specimens": [], "attempts": []}, status_code=503)
 
 
-@app.get("/api/specimen/{modality}")
-def specimen(modality: str) -> StreamingResponse:
-    """Stream a stamped specimen from the private bucket.
+def _stream(key: str, media_type: str) -> StreamingResponse:
+    """Proxy an object out of the private bucket.
 
     Proxied rather than linked, because the bucket stays private and the point
     of the page is that a visitor can download the real stamped file and check
@@ -73,21 +72,33 @@ def specimen(modality: str) -> StreamingResponse:
     """
     from hallmark import storage
 
-    entry = next((s for s in _showcase().get("specimens", []) if s["modality"] == modality), None)
-    if entry is None:
-        raise HTTPException(status_code=404, detail=f"No specimen for {modality}")
-
-    obj = storage.client().get_object(Bucket=storage.bucket(), Key=entry["key"])
-    filename = Path(entry["key"]).name
-
+    obj = storage.client().get_object(Bucket=storage.bucket(), Key=key)
     return StreamingResponse(
         obj["Body"].iter_chunks(CHUNK_BYTES),
-        media_type=entry["media_type"],
+        media_type=media_type,
         headers={
-            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Disposition": f'inline; filename="{Path(key).name}"',
             "Cache-Control": "public, max-age=3600",
         },
     )
+
+
+@app.get("/api/specimen/{modality}")
+def specimen(modality: str) -> StreamingResponse:
+    """Stream a stamped campaign specimen."""
+    entry = next((s for s in _showcase().get("specimens", []) if s["modality"] == modality), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No specimen for {modality}")
+    return _stream(entry["key"], entry["media_type"])
+
+
+@app.get("/api/gallery/{slug}")
+def gallery(slug: str) -> StreamingResponse:
+    """Stream a stamped gallery tile."""
+    entry = next((t for t in _showcase().get("gallery", []) if t["slug"] == slug), None)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"No gallery tile {slug}")
+    return _stream(entry["key"], "image/png")
 
 
 @app.get("/health")

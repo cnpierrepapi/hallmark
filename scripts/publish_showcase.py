@@ -97,8 +97,29 @@ def main() -> int:
         for c in campaign["candidates"]
     ]
 
+    # Gallery tiles are real stamped assets too, so a visitor can drop any of
+    # them into the checker. Published if a gallery run exists.
+    gallery = []
+    gallery_json = ROOT / "out" / "gallery" / "gallery.json"
+    if gallery_json.exists():
+        record = json.loads(gallery_json.read_text(encoding="utf-8"))
+        gallery = [
+            {
+                "slug": t["slug"],
+                "title": t["title"],
+                "key": t["key"],
+                "model": t["model"],
+                "sha256": t["sha256"],
+                "size_bytes": t["size_bytes"],
+                "latency_seconds": t["latency_seconds"],
+            }
+            for t in record.get("tiles", [])
+        ]
+        print(f"  gallery   {len(gallery)} tiles")
+
     payload = {
         "run_id": run_id,
+        "gallery": gallery,
         "product": campaign["brief"]["product"],
         "audience": campaign["brief"]["audience"],
         "canonical_hash": campaign["canonical_hash"],
