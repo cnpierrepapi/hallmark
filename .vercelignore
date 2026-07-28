@@ -1,0 +1,13 @@
+# .gitignore keeps secrets out of git, not out of a deployment bundle.
+# Vercel uploads the working directory, so secrets must be excluded here too.
+.env
+.env.*
+!.env.example
+
+.venv/
+out/
+tests/
+scripts/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
