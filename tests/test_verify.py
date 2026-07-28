@@ -85,6 +85,42 @@ class TestVerdicts:
         assert not result.ok
         assert result.computed_sha256 != result.declared_sha256
 
+    def test_multi_output_record_does_not_name_a_sibling_hash(self, tmp_path: Path) -> None:
+        """With several recorded outputs, a non-matching file must report none.
+
+        Falling back to another asset's hash would print an unrelated value
+        under "hash recorded" exactly when the answer has to be trustworthy.
+        """
+        source = tmp_path / "src.png"
+        original = _make_png(source)
+
+        step = Step(
+            step_type=StepType.GENERATE,
+            modality=Modality.IMAGE,
+            provider="gmicloud-image",
+            model="gpt-image-2-generate",
+            prompt="two candidates",
+            assets=[
+                Asset(
+                    url="https://example.test/a.png",
+                    media_type="image/png",
+                    sha256=hashlib.sha256(original).hexdigest(),
+                ),
+                Asset(url="https://example.test/b.mp3", media_type="audio/mpeg", sha256="c" * 64),
+            ],
+        )
+        manifest = Manifest.from_run(Run(name="multi", steps=[step]))
+
+        forged_src = tmp_path / "forged.png"
+        _make_png(forged_src, (2, 2, 2))
+        forged = tmp_path / "forged_stamped.png"
+        get_handler("image/png").embed(forged_src, manifest, forged)
+
+        result = verify(forged)
+        assert result.verdict == ALTERED
+        assert result.declared_sha256 is None
+        assert result.reason == "These bytes match none of the outputs recorded in this file"
+
     def test_unsigned(self, tmp_path: Path) -> None:
         bare = tmp_path / "bare.png"
         _make_png(bare)

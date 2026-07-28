@@ -179,6 +179,24 @@ def _resolve(path: Path, mime: str) -> tuple[Manifest | None, str]:
     return manifest, f"fetched:{manifest_uri}"
 
 
+def _matching_hash(computed: str, declared: list[str]) -> str | None:
+    """Return the recorded hash these bytes should be compared against.
+
+    A run can record several outputs, so a manifest often describes assets
+    other than the file in hand. Falling back to an arbitrary one would print
+    an unrelated asset's hash under "hash recorded", which is misleading at
+    exactly the moment the answer needs to be trustworthy.
+
+    So: an exact match wins. A record with a single output is unambiguous.
+    Anything else reports nothing rather than something wrong.
+    """
+    if computed in declared:
+        return computed
+    if len(declared) == 1:
+        return declared[0]
+    return None
+
+
 def _steps_from(manifest: Manifest) -> list[ProvenanceStep]:
     steps = []
     for step in manifest.run.steps:
@@ -242,7 +260,7 @@ def verify(path: Path, mime_type: str | None = None) -> VerificationResult:
         for asset in step.assets
         if asset.sha256
     ]
-    matched = computed if computed in declared else (declared[-1] if declared else None)
+    matched = _matching_hash(computed, declared)
 
     if not report.hash_ok:
         verdict = BROKEN
@@ -250,12 +268,16 @@ def verify(path: Path, mime_type: str | None = None) -> VerificationResult:
     elif report.unverified_sha256_ids:
         verdict = BROKEN
         reason = "The provenance record contains outputs with no valid hash"
-    elif matched is None:
+    elif not declared:
         verdict = BROKEN
         reason = "The provenance record declares no output hashes to check against"
     elif matched != computed:
         verdict = ALTERED
-        reason = "The media does not match the hash recorded when it was generated"
+        reason = (
+            "The media does not match the hash recorded when it was generated"
+            if matched
+            else "These bytes match none of the outputs recorded in this file"
+        )
     else:
         verdict = VERIFIED
         reason = None

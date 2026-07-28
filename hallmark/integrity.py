@@ -292,10 +292,9 @@ def canonical_sha256(path: Path, mime_type: str | None = None) -> str:
 def _declared_sha256(manifest: Manifest, computed: str) -> str | None:
     """Find the sha256 this manifest records for the file we are holding.
 
-    A run can produce several assets. Prefer an exact match so a multi-asset
-    manifest verifies whichever of its outputs the caller happens to have,
-    then fall back to the last output so a mismatch reports a real comparison
-    rather than an empty one.
+    A run can produce several assets. An exact match wins, and a record with a
+    single output is unambiguous. Beyond that, report nothing: naming an
+    arbitrary sibling asset as the expected hash would be actively misleading.
     """
     declared = [
         asset.sha256
@@ -305,7 +304,9 @@ def _declared_sha256(manifest: Manifest, computed: str) -> str | None:
     ]
     if computed in declared:
         return computed
-    return declared[-1] if declared else None
+    if len(declared) == 1:
+        return declared[0]
+    return None
 
 
 def verify_file(path: Path, mime_type: str | None = None) -> IntegrityReport:
