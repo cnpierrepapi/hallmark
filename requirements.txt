@@ -1,9 +1,11 @@
-# Runtime dependencies for the deployed verify service.
-# Deliberately excludes provider adapters: verification reads manifests and
-# hashes bytes, it never generates. Keeping them out holds the serverless
-# bundle well under the size limit.
+# Runtime dependencies for the deployed app.
 genblaze-core==0.3.7
 genblaze-s3==0.3.6
+# The demo generates on the page, so the GMI adapter ships now. Still no other
+# provider adapters: nothing else is called at runtime.
+genblaze-gmicloud==0.3.4
+# Quality checks decode images server-side.
+pillow==11.3.0
 # Required to read and strip ID3 tags when verifying audio. genblaze treats
 # this as optional, but audio verification is not optional for us.
 mutagen==1.48.1
