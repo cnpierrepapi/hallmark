@@ -4,6 +4,9 @@
 # bundle well under the size limit.
 genblaze-core==0.3.7
 genblaze-s3==0.3.6
+# Required to read and strip ID3 tags when verifying audio. genblaze treats
+# this as optional, but audio verification is not optional for us.
+mutagen==1.48.1
 fastapi==0.140.7
 python-multipart==0.0.20
 python-dotenv==1.0.1
