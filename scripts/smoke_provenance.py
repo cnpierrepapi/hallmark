@@ -15,19 +15,32 @@ import os
 import sys
 from pathlib import Path
 
+import boto3
 import httpx
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from genblaze_core import Manifest, Modality, Pipeline  # noqa: E402
+from genblaze_core import (  # noqa: E402
+    KeyStrategy,
+    Manifest,
+    Modality,
+    ObjectStorageSink,
+    Pipeline,
+)
 from genblaze_core.media import get_handler  # noqa: E402
 from genblaze_gmicloud import GMICloudImageProvider  # noqa: E402
+from genblaze_s3 import S3StorageBackend  # noqa: E402
 
 from hallmark.integrity import verify_file  # noqa: E402
 
-MODEL = "Z-Image-Turbo"
+# Chosen by measurement, not by name. See scripts/gmi_probe.py:
+# gpt-image-2-generate completes in ~3s through the async request queue and
+# returns PNG, which the genblaze PNG handler stamps directly. Z-Image-Turbo
+# and Flux2-Klein accept jobs that never leave the queue; seedream-5.0-pro
+# blocks the POST instead of returning a job id.
+MODEL = "gpt-image-2-generate"
 PROMPT = (
     "A ceramic coffee cup on a sunlit windowsill, steam rising, "
     "shallow depth of field, warm morning light"
@@ -36,6 +49,29 @@ OUT_DIR = ROOT / "out"
 
 
 def _download(url: str, dest: Path) -> None:
+    """Fetch an asset, using S3 credentials when it lives in our own bucket.
+
+    B2 buckets are private by default, so the durable URL recorded in the
+    manifest returns 401 to an anonymous GET. Anything pointing at our bucket
+    goes through boto3; anything else (a provider CDN URL) is fetched plainly.
+    """
+    bucket = os.environ.get("B2_BUCKET", "")
+    endpoint = os.environ.get("B2_ENDPOINT", "")
+
+    if bucket and endpoint and url.startswith(endpoint):
+        key = url[len(endpoint) :].lstrip("/")
+        if key.startswith(f"{bucket}/"):
+            key = key[len(bucket) + 1 :]
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            region_name=os.environ.get("B2_REGION"),
+            aws_access_key_id=os.environ["B2_KEY_ID"],
+            aws_secret_access_key=os.environ["B2_APP_KEY"],
+        )
+        client.download_file(bucket, key, str(dest))
+        return
+
     with httpx.stream("GET", url, timeout=120.0, follow_redirects=True) as response:
         response.raise_for_status()
         with open(dest, "wb") as handle:
@@ -51,16 +87,34 @@ def main() -> int:
 
     OUT_DIR.mkdir(exist_ok=True)
 
-    print(f"[1/6] Generating with {MODEL}")
+    # The sink is not optional for provenance. GMI returns a URL but never a
+    # hash, so a run without storage produces a manifest with no output
+    # sha256, which can never verify. ObjectStorageSink hashes each asset as
+    # it streams into B2, which is what makes the manifest checkable at all.
+    storage = ObjectStorageSink(
+        S3StorageBackend.for_backblaze(
+            os.environ["B2_BUCKET"],
+            region=os.environ.get("B2_REGION"),
+            key_id=os.environ["B2_KEY_ID"],
+            app_key=os.environ["B2_APP_KEY"],
+        ),
+        key_strategy=KeyStrategy.HIERARCHICAL,
+    )
+
+    print(f"[1/6] Generating with {MODEL}, storing to {os.environ['B2_BUCKET']}")
     result = (
         Pipeline("hallmark-smoke")
         .step(
-            GMICloudImageProvider(),
+            # GMI's POST /requests sometimes holds the connection until the
+            # job finishes instead of returning a job id. When the client
+            # gives up first the work still runs and still bills, so a short
+            # timeout orphans results we have already paid for. Wait it out.
+            GMICloudImageProvider(http_timeout=300.0),
             model=MODEL,
             prompt=PROMPT,
             modality=Modality.IMAGE,
         )
-        .run(timeout=300)
+        .run(sink=storage, timeout=900, raise_on_failure=False)
     )
 
     step = result.run.steps[0]
