@@ -83,9 +83,11 @@ def marks_for(path: Path, media_type: str) -> dict[str, bool]:
 
     return {
         "credential": safe(lambda: provenance.read_c2pa(path).present),
-        "visible": safe(lambda: bool(metadata.read_visible(path)))
-        if media_type.startswith("image/")
-        else False,
+        # Clips carry a readable credit too now, so this is asked of the file
+        # rather than decided from its type. Deciding from the type is how the
+        # sheet went on reporting nine assets with six credits after every one
+        # of them had been written.
+        "visible": safe(lambda: bool(metadata.read_visible(path))),
         "pointer": safe(lambda: bool(integrity.extract_embedded_json(path, media_type))),
     }
 

@@ -172,30 +172,13 @@ def _delivered_size(slug: str) -> int | None:
 def _marks(slug: str, media_type: str) -> dict[str, bool]:
     """Which marks a delivered file actually carries, read off the file.
 
-    Measured rather than assumed. The compliance sheet is built from this, and
-    a sheet that reports what the pipeline was supposed to do is worth nothing:
-    the clips shipped without credentials once already, silently, because a
-    parent was offered to the signer under the wrong media type.
+    One definition, shared with the live sheet, so the page and the record can
+    never report different marks for the same asset.
     """
-    from hallmark import integrity, metadata, provenance
+    from hallmark import compliance
 
     local = _delivered(slug)
-    if local is None:
-        return {}
-
-    def safe(fn, default=False):
-        try:
-            return fn()
-        except Exception:  # noqa: BLE001 - an unreadable mark is a missing mark
-            return default
-
-    return {
-        "credential": safe(lambda: provenance.read_c2pa(local).present),
-        "visible": safe(lambda: bool(metadata.read_visible(local)))
-        if media_type.startswith("image/")
-        else False,
-        "pointer": safe(lambda: bool(integrity.extract_embedded_json(local, media_type))),
-    }
+    return compliance.marks_for(local, media_type) if local else {}
 
 
 def _publish_thumb(slug: str, kind: str = "image") -> str | None:

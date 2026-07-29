@@ -532,10 +532,12 @@ def _visible_metadata(path: Path, media_type: str) -> dict[str, str]:
 
     Read out of the uploaded bytes rather than looked up anywhere, so the page
     can show the same thing the visitor's own machine will show once they save
-    the file. An image with nothing written into it returns nothing, which is
+    the file. A file with nothing written into it returns nothing, which is
     the honest answer for most of what gets checked here.
+
+    Asked of clips as well as stills, since clips carry a readable credit now.
     """
-    if not media_type.startswith("image/"):
+    if not (media_type.startswith("image/") or media_type.startswith("video/")):
         return {}
     try:
         from hallmark import metadata
