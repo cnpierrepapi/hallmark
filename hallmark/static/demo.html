@@ -298,6 +298,26 @@
     </div>
   </section>
 
+  <!-- 7 MARKING RECORD -->
+  <section class="step" id="s7">
+    <div class="marker"><div class="n">7</div><div class="t">Record</div></div>
+    <div>
+      <h2>Now take the paperwork with you.</h2>
+      <p class="say">
+        From 2 August 2026 an output like this has to be marked in a machine readable way,
+        and someone eventually has to show that it was. This run has its own marking record:
+        every asset you just made, <strong>which marks each one actually carries measured by
+        reading the file</strong>, the hash to check it by, and what the record does not
+        claim. The two nobody picked are on it too, carrying nothing, because that is true.
+      </p>
+      <div class="acts" id="sheetActs" style="display:none">
+        <a class="btn primary" id="sheetLink" href="#" target="_blank" rel="noopener">Open the marking record &rarr;</a>
+        <a class="btn" id="sheetDl" href="#">Download it</a>
+      </div>
+      <p class="hint" id="sheetHint">Pick an image first and this appears.</p>
+    </div>
+  </section>
+
 </div>
 
 <footer>
@@ -771,6 +791,23 @@ function renderInventory() {
   });
 
   set('invMeta', `run ${SESSION.run_id || '-'} · record hash ${(SESSION.canonical_hash || '').slice(0, 24)}`);
+  renderSheetLinks();
+}
+
+/* ---- 7. the marking record -------------------------------------------- */
+function renderSheetLinks() {
+  const acts = el('sheetActs');
+  const id = SESSION && SESSION.selection && SESSION.session_id;
+  if (!id) { acts.style.display = 'none'; return; }
+
+  el('sheetLink').href = `/compliance/session/${id}`;
+  el('sheetDl').href = `/compliance/session/${id}/download`;
+  el('sheetDl').setAttribute('download', '');
+  acts.style.display = '';
+  say('sheetHint',
+    'Built by reading the files in storage when you open it, so it reports what they '
+    + 'carry now rather than what this page intended.');
+  stepState('s6', 'done'); stepState('s7', 'live');
 }
 
 /* ---- resume ----------------------------------------------------------- */

@@ -186,16 +186,6 @@
   .two .side p { color: var(--dim); margin: 10px 0 0; max-width: 42ch; }
   .two .side .hash { margin-top: 14px; font-size: 11.5px; color: var(--faint); word-break: break-all; }
 
-  /* ---- check any file -------------------------------------------------- */
-  .check { padding: 9vh 0; }
-  .drop {
-    border: 1px dashed var(--faint); padding: 40px 30px; margin-top: 24px;
-    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
-  }
-  .drop:hover, .drop.over { border-color: var(--struck); background: rgba(201,162,39,.05); }
-  .drop p { margin: 0; color: var(--dim); }
-  .checkout { margin-top: 22px; }
-
   /* ---- closing CTA ---------------------------------------------------- */
   .close {
     border-top: 1px solid var(--rule);
@@ -221,7 +211,7 @@
   <a class="wordmark" href="/">Hallmark</a>
   <nav class="mastnav">
     <a href="/demo">The demo</a>
-    <a href="#check">Check a file</a>
+    <a href="#wall">The wall</a>
     <a href="/compliance/current">Marking record</a>
     <a href="/health">Status</a>
   </nav>
@@ -240,7 +230,7 @@
       </p>
       <div class="acts">
         <a class="btn primary" href="/demo">Run the demo &rarr;</a>
-        <a class="btn" href="#check">Check a file</a>
+        <a class="btn" href="#wall">Check one of ours</a>
       </div>
       <p class="under">No account. Nothing pre-recorded. The demo generates real images and lets you break the proof yourself.</p>
     </div>
@@ -253,7 +243,7 @@
 </div>
 
 <!-- FULL BLEED WALL -->
-<section class="wall">
+<section class="wall" id="wall">
   <div class="heading">
     <div>
       <p class="label">every one of these is a real signed file</p>
@@ -397,47 +387,6 @@
   </div>
 </section>
 
-<!-- CHECK ANY FILE -->
-<div class="wrap">
-  <section class="check" id="check">
-    <p class="label">check any file</p>
-    <h2 class="display" style="font-size:clamp(28px,4.2vw,50px);margin-top:10px">Bring your own.</h2>
-    <p class="dim" style="max-width:64ch;margin-top:14px">
-      An image, a video or an audio file, from this pipeline or from anywhere else.
-      Nothing is stored. The file is read three ways and each one answers separately:
-      our own record, a Content Credential from whoever made or edited it, and any
-      unsigned claim written into the file's metadata.
-    </p>
-    <p class="faint" style="max-width:64ch;margin-top:10px;font-size:12.5px">
-      Credentials from Adobe, Google, OpenAI through Firefly, Microsoft, Truepic and the
-      camera makers are checked against the published trust list that ships with this
-      service. They are never added up into a single verdict on whether something is AI,
-      because no honest tool can produce one.
-    </p>
-    <label class="drop" id="drop">
-      <input type="file" id="file" style="display:none" accept="image/*,video/mp4,audio/*">
-      <p><span class="struck">Choose a file</span> or drop one here</p>
-      <p class="faint" style="margin-top:8px;font-size:12px">png, jpg, mp4 and mp3, up to 4.5MB, which is this host's ceiling on an upload</p>
-    </label>
-    <div class="checkout">
-      <div class="verdict hidden" id="cVerdict"><h3 id="cLabel"></h3><p id="cSaid"></p></div>
-      <div class="hidden" id="cProv">
-        <p class="headline" id="cHead"></p>
-        <ul class="reads" id="cReads"></ul>
-        <p class="caveat" id="cCaveat"></p>
-      </div>
-      <dl class="rows hidden" id="cRows" style="margin-top:18px;max-width:780px">
-        <div class="row"><dt>Hash now</dt><dd id="cNow"></dd></div>
-        <div class="row"><dt>Hash recorded</dt><dd id="cRec"></dd></div>
-        <div class="row"><dt>Record found in</dt><dd id="cSrc"></dd></div>
-        <div class="row"><dt>Signed off by</dt><dd id="cWho"></dd></div>
-        <div class="row"><dt>Made with</dt><dd id="cModel"></dd></div>
-        <div class="row"><dt>Prompt</dt><dd id="cPrompt"></dd></div>
-      </dl>
-    </div>
-  </section>
-</div>
-
 <!-- CLOSE -->
 <section class="close">
   <div class="wrap">
@@ -445,7 +394,7 @@
     <h2 class="display">Make one.<br>Then try to fake it.</h2>
     <div class="acts">
       <a class="btn primary" href="/demo">Run the demo &rarr;</a>
-      <a class="btn" href="#check">Check a file first</a>
+      <a class="btn" href="#wall">Check one of ours first</a>
     </div>
   </div>
 </section>
@@ -458,6 +407,7 @@
   </p>
   <p style="margin-top:14px">
     Generated through GMI Cloud, orchestrated with Genblaze, stored on Backblaze B2.
+    <a href="/compliance/current">marking record</a> &middot;
     <a href="/health">status</a>
   </p>
 </footer>
@@ -700,80 +650,8 @@ function readingLine(f) {
 function readsList(prov) {
   if (!prov || !prov.findings) return '';
   return `<p class="headline">${prov.summary.headline}</p>
-    <ul class="reads">${prov.findings.map(readingLine).join('')}</ul>`;
-}
-
-function showProvenance(prov) {
-  const box = el('cProv');
-  if (!prov || !prov.findings) { box.classList.add('hidden'); return; }
-  set('cHead', prov.summary.headline);
-  el('cReads').innerHTML = prov.findings.map(readingLine).join('');
-  set('cCaveat', prov.summary.caveat);
-  box.classList.remove('hidden');
-}
-
-/* ---- bring your own file --------------------------------------------- */
-const drop = el('drop');
-['dragenter', 'dragover'].forEach(k => drop.addEventListener(k, e => { e.preventDefault(); drop.classList.add('over'); }));
-['dragleave', 'drop'].forEach(k => drop.addEventListener(k, e => { e.preventDefault(); drop.classList.remove('over'); }));
-drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) checkFile(e.dataTransfer.files[0]); });
-el('file').addEventListener('change', e => { if (e.target.files[0]) checkFile(e.target.files[0]); });
-
-async function checkFile(file) {
-  el('cVerdict').className = 'verdict';
-  set('cLabel', 'checking'); set('cSaid', `${file.name}, ${Math.round(file.size / 1024)}KB`);
-  el('cVerdict').classList.remove('hidden');
-  el('cRows').classList.add('hidden');
-  el('cProv').classList.add('hidden');
-
-  // Say this plainly rather than letting the request bounce off the platform
-  // and return an error page nobody can read.
-  if (file.size > UPLOAD_LIMIT) {
-    el('cVerdict').className = 'verdict unsigned';
-    set('cLabel', 'too large to post');
-    set('cSaid',
-      `This host caps an upload at 4.5MB and that file is ${(file.size / 1024 / 1024).toFixed(1)}MB. ` +
-      'A file this size is checked where it is stored instead of being sent: that is what the clips on ' +
-      'the wall above do. Nothing about the file is wrong.');
-    return;
-  }
-
-  try {
-    const body = new FormData();
-    body.append('file', file, file.name);
-    const d = await (await fetch('/api/verify', { method: 'POST', body })).json();
-
-    el('cVerdict').className = 'verdict ' + d.verdict;
-    set('cLabel', d.verdict);
-    // The verdict is only ever about our own record. A file signed by someone
-    // else is unsigned here and still fully accounted for, so say which
-    // question was just answered before the answer is read as a wider one.
-    const elsewhere = (d.provenance && d.provenance.summary.sources_found || [])
-      .some(s => s !== 'hallmark');
-    set('cSaid', (d.reason ? `${d.summary} ${d.reason}.` : d.summary)
-      + (d.verdict === 'unsigned' && elsewhere
-        ? ' That answers our record only. This file carries provenance from elsewhere, below.'
-        : ''));
-    showProvenance(d.provenance);
-
-    const same = d.computed_sha256 && d.computed_sha256 === d.declared_sha256;
-    el('cNow').className = same ? 'match' : '';
-    set('cNow', d.computed_sha256);
-    set('cRec', d.declared_sha256);
-    set('cSrc', d.manifest_source === 'none' ? 'nothing embedded' : d.manifest_source);
-
-    const step = (d.steps || [])[0];
-    const ok = d.approval;
-    set('cWho', ok
-      ? `${ok.approver}, ${ok.decision}${ok.note ? ` ("${ok.note}")` : ''}`
-      : null);
-    set('cModel', step ? `${step.model} (${step.provider || 'unknown provider'})` : null);
-    set('cPrompt', step ? (step.prompt_withheld ? 'withheld by the publisher' : step.prompt) : null);
-    el('cRows').classList.remove('hidden');
-  } catch (err) {
-    el('cVerdict').className = 'verdict broken';
-    set('cLabel', 'error'); set('cSaid', err.message);
-  }
+    <ul class="reads">${prov.findings.map(readingLine).join('')}</ul>
+    <p class="caveat">${prov.summary.caveat}</p>`;
 }
 
 loadShowcase();

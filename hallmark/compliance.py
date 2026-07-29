@@ -28,6 +28,7 @@ No single one of them is sufficient, which is why all three are written.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 # What the sheet says about the pipeline, in the words the vendors use.
@@ -63,6 +64,32 @@ LIMITS = [
 ]
 
 
+def marks_for(path: Path, media_type: str) -> dict[str, bool]:
+    """Which marks a file actually carries, read off the file itself.
+
+    Measured, never assumed. A sheet reporting what the pipeline was supposed
+    to do is worth nothing: the clips shipped without credentials once already,
+    silently, because a parent was offered to the signer under the wrong media
+    type. One definition, shared by the publisher and by the live sheet, so the
+    two can never report different marks for the same asset.
+    """
+    from hallmark import integrity, metadata, provenance
+
+    def safe(fn: Any, default: bool = False) -> bool:
+        try:
+            return bool(fn())
+        except Exception:  # noqa: BLE001 - an unreadable mark is a missing mark
+            return default
+
+    return {
+        "credential": safe(lambda: provenance.read_c2pa(path).present),
+        "visible": safe(lambda: bool(metadata.read_visible(path)))
+        if media_type.startswith("image/")
+        else False,
+        "pointer": safe(lambda: bool(integrity.extract_embedded_json(path, media_type))),
+    }
+
+
 def asset_row(tile: dict[str, Any]) -> dict[str, Any]:
     """One asset, reduced to what an auditor would want to see."""
     marks = tile.get("marks") or {}
@@ -75,6 +102,11 @@ def asset_row(tile: dict[str, Any]) -> dict[str, Any]:
         "sha256": tile.get("sha256", ""),
         "size_bytes": tile.get("size_bytes", 0),
         "manifest_uri": tile.get("manifest_uri", ""),
+        # Where a reader goes to check this particular asset for themselves.
+        # Campaign assets get re-checked in place; a visitor's own assets are
+        # offered back to them, since they are the one holding the copy.
+        "check": tile.get("check", ""),
+        "check_label": tile.get("check_label", ""),
         "marks": [MARK_LABELS[k] for k in ("credential", "visible", "pointer") if marks.get(k)],
         "missing": [MARK_LABELS[k] for k in ("credential", "visible", "pointer")
                     if k in marks and not marks.get(k)],
@@ -103,5 +135,67 @@ def build(showcase: dict[str, Any]) -> dict[str, Any]:
         "asset_count": len(rows),
         "marks_applied": counted,
         "ledger": showcase.get("ledger") or [],
+        "limits": LIMITS,
+    }
+
+
+def from_session(session: dict[str, Any], marks: dict[str, dict[str, bool]]) -> dict[str, Any]:
+    """Assemble the record for one visitor's own run on the demo.
+
+    Same document as a campaign gets, built from what the visitor actually
+    generated, so the sheet is not something they have to take our word for
+    from a run they never saw. The assets nobody picked are on it too, marked
+    as carrying nothing, because they were never signed off and the record
+    should say so rather than quietly leaving them out.
+    """
+    picked = (session.get("selection") or {}).get("picked")
+    rows = []
+    for c in session.get("candidates") or []:
+        if not c.get("stored_key"):
+            continue
+        chosen = c.get("index") == picked
+        rows.append(
+            asset_row(
+                {
+                    "slug": c["stored_key"].rsplit("/", 1)[-1],
+                    "title": ("Approved asset" if chosen else "Not selected")
+                    + f", candidate {c.get('index')}",
+                    "kind": "image",
+                    "media_type": c.get("media_type", ""),
+                    "model": c.get("model") or session.get("model", ""),
+                    "sha256": c.get("sha256", ""),
+                    "size_bytes": c.get("size_bytes", 0),
+                    "manifest_uri": session.get("manifest_uri", "") if chosen else "",
+                    "check": f"/api/demo/asset/{session.get('session_id')}/"
+                             f"{c['stored_key'].rsplit('/', 1)[-1]}?download=1",
+                    "check_label": "download this file",
+                    "marks": marks.get(c["stored_key"], {}),
+                }
+            )
+        )
+
+    counted: dict[str, int] = {}
+    for key, label in MARK_LABELS.items():
+        counted[label] = sum(1 for m in marks.values() if m.get(key))
+
+    selection = session.get("selection") or {}
+    return {
+        "run_id": session.get("run_id") or session.get("session_id", ""),
+        "product": session.get("brief", ""),
+        "audience": session.get("style_label", ""),
+        "approval": {
+            "approver": selection.get("signer"),
+            "approved_at": selection.get("decided_at"),
+            "note": selection.get("human_reason"),
+            "decision": "approved" if picked is not None else None,
+        },
+        "manifest_uri": session.get("manifest_uri", ""),
+        "canonical_hash": session.get("canonical_hash", ""),
+        "statement": STATEMENT,
+        "pipeline": PIPELINE,
+        "assets": rows,
+        "asset_count": len(rows),
+        "marks_applied": counted,
+        "ledger": [],
         "limits": LIMITS,
     }

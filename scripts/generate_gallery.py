@@ -232,18 +232,21 @@ def _deliver(slug: str, title: str, hero: bool, raw: Path, model: str, prompt: s
     PNG that came back from the model, not the JPEG we ship.
     """
     delivered = OUT / f"{slug}_delivery{out_suffix}"
+    credit = metadata.Signature(
+        approver=APPROVER,
+        model=model,
+        note=APPROVAL_NOTE,
+        brief=title,
+        verify_url=VERIFY_BASE,
+        medium="video" if out_mime == "video/mp4" else "image",
+    )
     if signed:
-        metadata.to_jpeg(
-            raw,
-            delivered,
-            metadata.Signature(
-                approver=APPROVER,
-                model=model,
-                note=APPROVAL_NOTE,
-                brief=title,
-                verify_url=VERIFY_BASE,
-            ),
-        )
+        metadata.to_jpeg(raw, delivered, credit)
+    elif out_mime == "video/mp4":
+        # Clips used to ship with nothing a file browser could show, on a page
+        # that tells people to open the properties. Written here, before the
+        # hash, so the credit is inside what the record covers.
+        metadata.to_mp4(raw, delivered, credit)
     else:
         delivered.write_bytes(raw.read_bytes())
 

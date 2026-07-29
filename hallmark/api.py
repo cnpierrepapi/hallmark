@@ -398,6 +398,62 @@ def _sheet(run_id: str) -> tuple[dict, str]:
     return compliance.build(showcase), base
 
 
+def _session_sheet(session_id: str) -> tuple[dict, str]:
+    """The marking record for one visitor's own run.
+
+    Marks are measured by reading the stored files, not by trusting what the
+    selection step meant to do. It costs a few reads per request, and it is the
+    whole point: a sheet nobody checked is a sheet nobody should believe.
+    """
+    from hallmark import compliance, demo, storage
+
+    session = demo.load_session(session_id)
+    if session is None or session.get("status") != "selected":
+        raise HTTPException(status_code=404, detail="No completed run under that id")
+
+    marks: dict[str, dict[str, bool]] = {}
+    for candidate in session.get("candidates") or []:
+        key = candidate.get("stored_key")
+        if not key:
+            continue
+        suffix = Path(key).suffix or ".bin"
+        handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp_path = Path(handle.name)
+        try:
+            with handle:
+                body = storage.client().get_object(Bucket=storage.bucket(), Key=key)["Body"]
+                for chunk in body.iter_chunks(CHUNK_BYTES):
+                    handle.write(chunk)
+            marks[key] = compliance.marks_for(tmp_path, candidate.get("media_type", ""))
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    base = os.environ.get("HALLMARK_VERIFY_BASE", "").rstrip("/")
+    return compliance.from_session(session, marks), base
+
+
+@app.get("/compliance/session/{session_id}", response_class=HTMLResponse)
+def session_sheet(session_id: str) -> HTMLResponse:
+    """The marking record for a run made on the demo."""
+    from hallmark import sheet
+
+    record, base = _session_sheet(session_id)
+    return HTMLResponse(sheet.render(record, base))
+
+
+@app.get("/compliance/session/{session_id}/download", response_class=HTMLResponse)
+def session_sheet_download(session_id: str) -> HTMLResponse:
+    """The visitor's own marking record, as a file to keep."""
+    from hallmark import sheet
+
+    record, base = _session_sheet(session_id)
+    name = f"marking-record-{(record['run_id'] or session_id)[:8]}.html"
+    return HTMLResponse(
+        sheet.render(record, base, standalone=True),
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 @app.get("/compliance/{run_id}", response_class=HTMLResponse)
 def compliance_sheet(run_id: str) -> HTMLResponse:
     """A campaign's marking record, at a URL that keeps working.

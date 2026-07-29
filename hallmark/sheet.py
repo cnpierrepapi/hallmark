@@ -67,7 +67,9 @@ def _rows(assets: list[dict[str, Any]], base: str) -> str:
             for m in asset["missing"]
         )
         size = f"{asset['size_bytes'] / 1024:,.0f} KB" if asset["size_bytes"] else ""
-        check = f"{base}/api/verify-stored/{escape(asset['slug'])}"
+        check = base + escape(asset["check"]) if asset.get("check") \
+            else f"{base}/api/verify-stored/{escape(asset['slug'])}"
+        label = escape(asset.get("check_label") or "check this file")
         out.append(
             f"""<tr>
   <td><strong>{escape(asset['title'])}</strong><br>
@@ -75,7 +77,7 @@ def _rows(assets: list[dict[str, Any]], base: str) -> str:
   <td>{escape(asset['model'])}</td>
   <td>{marks or '<span class="mark absent">none recorded</span>'}</td>
   <td class="hash">{escape(asset['sha256'])}<br>
-      <a href="{check}">check this file</a></td>
+      <a href="{check}">{label}</a></td>
 </tr>"""
         )
     return "\n".join(out)

@@ -17,6 +17,7 @@ than the PNG one.
 from __future__ import annotations
 
 import hashlib
+import struct
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -157,3 +158,119 @@ class TestPngAdditions:
         # the file is unchanged and still strips back to the original.
         assert twice.read_bytes() == once.read_bytes()
         assert metadata.strip_png(twice.read_bytes()) == original
+
+
+NUL = b"\x00"
+
+
+def _box(kind: bytes, body: bytes) -> bytes:
+    return struct.pack(">I", len(body) + 8) + kind + body
+
+
+def _clip(path: Path, entries: dict[str, str] | None = None) -> bytes:
+    """A tiny MP4 carrying the Apple style table these clips arrive with.
+
+    Built rather than recorded, because the point of the conversion is that the
+    names live in a keys box and the values are stored against their position
+    in it. A fixture written the iTunes way would pass the test without the
+    code under test doing anything.
+    """
+    entries = entries or {"encoder": "Lavf60.16.100"}
+    fixture = Path(__file__).parent / "fixtures" / "tiny.mp4"
+    data = fixture.read_bytes()
+
+    keys = b"".join(_box(b"mdta", name.encode()) for name in entries)
+    keys = _box(b"keys", struct.pack(">II", 0, len(entries)) + keys)
+    values = b"".join(
+        _box(struct.pack(">I", i), _box(b"data", struct.pack(">II", 1, 0) + v.encode()))
+        for i, v in enumerate(entries.values(), start=1)
+    )
+    meta = _box(b"meta", NUL * 4
+                + _box(b"hdlr", NUL * 8 + b"mdta" + NUL * 12)
+                + keys + _box(b"ilst", values))
+
+    moov_at = data.rindex(b"moov") - 4
+    size = struct.unpack(">I", data[moov_at:moov_at + 4])[0]
+    body = data[moov_at + 8:moov_at + size]
+    # The old table goes, so what is left is only the one built here.
+    rebuilt = _box(b"moov", _drop(body, b"udta") + _box(b"udta", meta))
+
+    data = data[:moov_at] + rebuilt + data[moov_at + size:]
+    path.write_bytes(data)
+    return data
+
+
+def _drop(body: bytes, kind: bytes) -> bytes:
+    out, pos = bytearray(), 0
+    while pos + 8 <= len(body):
+        size = struct.unpack(">I", body[pos:pos + 4])[0]
+        if size < 8:
+            break
+        if body[pos + 4:pos + 8] != kind:
+            out += body[pos:pos + size]
+        pos += size
+    return bytes(out)
+
+
+class TestMp4:
+    def test_windows_readable_fields_are_written(
+        self, tmp_path: Path, signature: Signature
+    ) -> None:
+        """Windows reads the iTunes table only, which is measured, not assumed.
+
+        The same tags under the Apple table these clips arrive with show nothing
+        at all in the properties dialog.
+        """
+        source = tmp_path / "raw.mp4"
+        _clip(source)
+
+        dest = tmp_path / "delivered.mp4"
+        metadata.to_mp4(source, dest, signature)
+
+        body = dest.read_bytes()
+        table = body.rindex(b"meta")
+        assert b"mdir" in body[table : table + 48], "Windows ignores the mdta table"
+        assert b"mdta" not in body[table:], "the old table must not be left behind"
+
+        fields = metadata.read_visible(dest)
+        assert signature.approver in fields["artist"]
+        assert signature.model in fields["comment"]
+        assert "AI generated" in fields["title"]
+
+    def test_the_generators_own_metadata_survives(
+        self, tmp_path: Path, signature: Signature
+    ) -> None:
+        """Replacing the table must not throw away what the model wrote in it.
+
+        The video model records who produced the render under its own key.
+        Destroying that to make room for our credit would be the exact failure
+        this product exists to stop.
+        """
+        from mutagen.mp4 import MP4
+
+        blob = '{"ContentProducer":"001191330106","ProduceID":"R-lnPp61"}'
+        source = tmp_path / "raw.mp4"
+        _clip(source, {"AIGC": blob, "encoder": "Lavf60.16.100"})
+
+        dest = tmp_path / "delivered.mp4"
+        metadata.to_mp4(source, dest, signature)
+
+        clip = MP4(dest)
+        carried = clip.get("----:com.hallmark:generator.AIGC")
+        assert carried, "the generator's own record was dropped"
+        assert bytes(carried[0]).decode() == blob
+        assert clip["\xa9nam"], "our own credit must be there as well"
+
+    def test_editing_the_credit_changes_the_file(
+        self, tmp_path: Path, signature: Signature
+    ) -> None:
+        source = tmp_path / "raw.mp4"
+        _clip(source)
+        dest = tmp_path / "delivered.mp4"
+        metadata.to_mp4(source, dest, signature)
+
+        before = hashlib.sha256(dest.read_bytes()).hexdigest()
+        edited = dest.read_bytes().replace(
+            signature.approver.encode(), b"X" * len(signature.approver)
+        )
+        assert hashlib.sha256(edited).hexdigest() != before
