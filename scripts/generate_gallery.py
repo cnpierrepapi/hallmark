@@ -389,8 +389,12 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
 
     wanted = sys.argv[1] if len(sys.argv) > 1 else "all"
-    if wanted not in ("all", "image", "video", "redeliver"):
-        print("Usage: generate_gallery.py [all|image|video|redeliver]")
+    # Re-delivering one modality leaves the other's published files and hashes
+    # exactly where they are. Rewriting assets nothing asked about is churn on
+    # live objects, and every rewrite is a new set of records to reconcile.
+    half = sys.argv[2] if len(sys.argv) > 2 else None
+    if wanted not in ("all", "image", "video", "redeliver") or half not in (None, "image", "video"):
+        print("Usage: generate_gallery.py [all|image|video|redeliver [image|video]]")
         return 2
 
     # Keep whatever the other modality published last time, so a rerun of one
@@ -401,7 +405,8 @@ def main() -> int:
         record = json.loads(existing.read_text(encoding="utf-8"))
 
     previous = record.get("tiles", [])
-    kept = [t for t in previous if wanted not in ("all", "redeliver") and t.get("kind") != wanted]
+    touching = half if wanted == "redeliver" else wanted
+    kept = [t for t in previous if touching not in ("all", None) and t.get("kind") != touching]
 
     tiles: list[dict] = []
     attempts: list[Attempt] = []
@@ -409,8 +414,10 @@ def main() -> int:
     if wanted == "redeliver":
         # No model is called and no attempt is made, so nothing goes on the
         # ledger: these are the same assets, delivered in a different container.
-        tiles += _redeliver("image", STILLS, Modality.IMAGE, ".png", "image/png", previous)
-        tiles += _redeliver("video", CLIPS, Modality.VIDEO, ".mp4", "video/mp4", previous)
+        if half in (None, "image"):
+            tiles += _redeliver("image", STILLS, Modality.IMAGE, ".png", "image/png", previous)
+        if half in (None, "video"):
+            tiles += _redeliver("video", CLIPS, Modality.VIDEO, ".mp4", "video/mp4", previous)
         if not tiles:
             print("Nothing to re-deliver: no renders found in out/gallery.")
             return 1
