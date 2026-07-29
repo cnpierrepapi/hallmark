@@ -3,6 +3,14 @@
 # Generation, only needed to build campaigns, never to verify one.
 genblaze[gmicloud]==0.4.4
 
+# The ledger is Parquet, and nothing the deployed function imports reads it.
+# The live demo drops attempts as JSON and the publish step folds them in from
+# here, so the columnar engine stays on the machine that queries it. pyarrow
+# also needs an IANA timezone database to read back timezone-aware timestamps,
+# which Windows does not ship with Python.
+pyarrow==25.0.0
+tzdata==2025.2
+
 pytest==8.4.2
 pillow==11.3.0
 httpx==0.28.1

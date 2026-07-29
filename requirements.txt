@@ -9,10 +9,13 @@ pillow==11.3.0
 # Required to read and strip ID3 tags when verifying audio. genblaze treats
 # this as optional, but audio verification is not optional for us.
 mutagen==1.48.1
-# Ledger analytics. pyarrow needs an IANA timezone database to read back
-# timezone-aware timestamps, which Windows does not ship with Python.
-pyarrow==25.0.0
-tzdata==2025.2
+# Imported directly by hallmark.storage and hallmark.demo. All three only
+# arrived here as transitive dependencies of the genblaze adapters, which is
+# someone else's constraint to relax, so they are pinned where they are used.
+# tests/test_packaging.py fails if a directly imported package goes undeclared.
+httpx==0.28.1
+boto3==1.43.57
+botocore==1.43.57
 fastapi==0.140.7
 python-multipart==0.0.20
 python-dotenv==1.0.1
