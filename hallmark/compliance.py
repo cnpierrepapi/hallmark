@@ -141,58 +141,100 @@ def build(showcase: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def from_session(session: dict[str, Any], marks: dict[str, dict[str, bool]]) -> dict[str, Any]:
-    """Assemble the record for one visitor's own run on the demo.
+def from_session(
+    session: dict[str, Any],
+    runs: list[dict[str, Any]],
+    marks: dict[str, dict[str, bool]],
+) -> dict[str, Any]:
+    """Assemble the record for everything one browser has generated.
 
     Same document as a campaign gets, built from what the visitor actually
     generated, so the sheet is not something they have to take our word for
     from a run they never saw. The assets nobody picked are on it too, marked
     as carrying nothing, because they were never signed off and the record
     should say so rather than quietly leaving them out.
+
+    The scope is the browser session, not one run. Somebody who generates
+    stills, then a clip, then stills again is holding six or nine files and
+    needs one document covering all of them; a record that silently dropped
+    everything but the last run would be worse than none, because it would look
+    complete.
+
+    ``marks`` holds what was measured by reading the files during this request.
+    Anything absent from it falls back to what was measured at delivery, and
+    the row says which of the two it is rather than presenting them as the same
+    thing. Re-reading every file of every run inside a function that dies at 60
+    seconds is not something a clip-sized asset survives.
     """
-    picked = (session.get("selection") or {}).get("picked")
     rows = []
-    for c in session.get("candidates") or []:
-        if not c.get("stored_key"):
-            continue
-        chosen = c.get("index") == picked
-        rows.append(
-            asset_row(
+    measured_now = 0
+    for run in runs:
+        seq = run.get("run_seq")
+        label = run.get("kind_label") or ("Video clip" if run.get("kind") == "video"
+                                          else "Still image")
+        for asset in run.get("assets") or []:
+            key = asset.get("stored_key")
+            if not key:
+                continue
+            name = key.rsplit("/", 1)[-1]
+            chosen = bool(asset.get("accepted"))
+            fresh = key in marks
+            measured_now += 1 if fresh else 0
+            row = asset_row(
                 {
-                    "slug": c["stored_key"].rsplit("/", 1)[-1],
-                    "title": ("Approved asset" if chosen else "Not selected")
-                    + f", candidate {c.get('index')}",
-                    "kind": "image",
-                    "media_type": c.get("media_type", ""),
-                    "model": c.get("model") or session.get("model", ""),
-                    "sha256": c.get("sha256", ""),
-                    "size_bytes": c.get("size_bytes", 0),
-                    "manifest_uri": session.get("manifest_uri", "") if chosen else "",
-                    "check": f"/api/demo/asset/{session.get('session_id')}/"
-                             f"{c['stored_key'].rsplit('/', 1)[-1]}?download=1",
+                    "slug": name,
+                    "title": (
+                        f"Run {seq} · {label} · "
+                        + ("approved" if chosen else "not selected")
+                        + f", candidate {asset.get('index')}"
+                    ),
+                    "kind": run.get("kind", "image"),
+                    "media_type": asset.get("media_type", ""),
+                    "model": run.get("model", "") or session.get("model", ""),
+                    "sha256": asset.get("sha256", ""),
+                    "size_bytes": asset.get("size_bytes", 0),
+                    "manifest_uri": run.get("manifest_uri", "") if chosen else "",
+                    "check": f"/api/demo/asset/{session.get('session_id')}/{name}?download=1",
                     "check_label": "download this file",
-                    "marks": marks.get(c["stored_key"], {}),
+                    "marks": marks.get(key) or asset.get("marks") or {},
                 }
             )
-        )
+            row["measured"] = "read from the file just now" if fresh else (
+                "read from the file when it was delivered"
+            )
+            rows.append(row)
 
     counted: dict[str, int] = {}
-    for key, label in MARK_LABELS.items():
-        counted[label] = sum(1 for m in marks.values() if m.get(key))
+    for key, mark_label in MARK_LABELS.items():
+        counted[mark_label] = sum(
+            1
+            for run in runs
+            for asset in run.get("assets") or []
+            if (marks.get(asset.get("stored_key")) or asset.get("marks") or {}).get(key)
+        )
 
-    selection = session.get("selection") or {}
+    # The newest run is the one the page just walked through, so its approval
+    # is the one to head the document with.
+    latest = runs[-1] if runs else {}
+    selection = latest.get("selection") or {}
+    briefs = [r.get("brief", "") for r in runs if r.get("brief")]
+
     return {
-        "run_id": session.get("run_id") or session.get("session_id", ""),
-        "product": session.get("brief", ""),
-        "audience": session.get("style_label", ""),
+        "run_id": session.get("session_id", ""),
+        "scope": "session",
+        "run_count": len(runs),
+        "measured_now": measured_now,
+        "product": "; ".join(dict.fromkeys(briefs)) or session.get("brief", ""),
+        "audience": latest.get("style_label", "") or session.get("style_label", ""),
         "approval": {
             "approver": selection.get("signer"),
             "approved_at": selection.get("decided_at"),
             "note": selection.get("human_reason"),
-            "decision": "approved" if picked is not None else None,
+            "decision": "approved" if selection.get("picked") is not None else None,
         },
-        "manifest_uri": session.get("manifest_uri", ""),
-        "canonical_hash": session.get("canonical_hash", ""),
+        "manifest_uri": latest.get("manifest_uri", ""),
+        "canonical_hash": latest.get("canonical_hash", ""),
+        "download_url": f"/compliance/session/{session.get('session_id', '')}/download",
         "statement": STATEMENT,
         "pipeline": PIPELINE,
         "assets": rows,

@@ -70,12 +70,20 @@ def _rows(assets: list[dict[str, Any]], base: str) -> str:
         check = base + escape(asset["check"]) if asset.get("check") \
             else f"{base}/api/verify-stored/{escape(asset['slug'])}"
         label = escape(asset.get("check_label") or "check this file")
+        # Whether these marks were read during this request or recorded when
+        # the file was delivered. Both are measurements off the file, but they
+        # were taken at different moments and the sheet should not blur that.
+        when = (
+            f'<br><span class="hash">{escape(asset["measured"])}</span>'
+            if asset.get("measured")
+            else ""
+        )
         out.append(
             f"""<tr>
   <td><strong>{escape(asset['title'])}</strong><br>
       <span class="hash">{escape(asset['media_type'])} &middot; {size}</span></td>
   <td>{escape(asset['model'])}</td>
-  <td>{marks or '<span class="mark absent">none recorded</span>'}</td>
+  <td>{marks or '<span class="mark absent">none recorded</span>'}{when}</td>
   <td class="hash">{escape(asset['sha256'])}<br>
       <a href="{check}">{label}</a></td>
 </tr>"""
@@ -109,11 +117,23 @@ def render(record: dict[str, Any], base: str = "", *, standalone: bool = False) 
         for r in record.get("ledger", [])
     )
 
+    # A session sheet lives at a different URL from a campaign's, so the record
+    # says where its own download is rather than the shape being assumed here.
+    # Assuming it sent every visitor's download link to a page that 404s.
+    href = record.get("download_url") or f"/compliance/{record['run_id']}/download"
     download = (
         ""
         if standalone
-        else f'<p class="noprint"><a class="cta" href="{base}/compliance/'
-        f'{escape(record["run_id"])}/download">Download this sheet</a></p>'
+        else f'<p class="noprint"><a class="cta" href="{base}{escape(href)}">'
+        "Download this sheet</a></p>"
+    )
+
+    session_scope = record.get("scope") == "session"
+    heading = "Everything this browser has generated" if session_scope else "Campaign"
+    runs_row = (
+        f"    <dt>Runs</dt><dd>{record.get('run_count', 0)}</dd>\n"
+        if session_scope
+        else ""
     )
 
     body = f"""
@@ -124,10 +144,10 @@ def render(record: dict[str, Any], base: str = "", *, standalone: bool = False) 
   <div class="statement">{escape(record['statement'])}</div>
   {download}
 
-  <h2>Campaign</h2>
+  <h2>{escape(heading)}</h2>
   <dl class="meta">
-    <dt>Run</dt><dd>{escape(record['run_id'])}</dd>
-    <dt>Audience</dt><dd>{escape(record.get('audience') or 'Not recorded')}</dd>
+    <dt>{'Session' if session_scope else 'Run'}</dt><dd>{escape(record['run_id'])}</dd>
+{runs_row}    <dt>Audience</dt><dd>{escape(record.get('audience') or 'Not recorded')}</dd>
     <dt>Assets</dt><dd>{record['asset_count']}</dd>
     <dt>Approved by</dt><dd>{escape(str(approval.get('approver') or 'Not recorded'))}</dd>
     <dt>Approved at</dt><dd>{escape(str(approval.get('approved_at') or 'Not recorded'))}</dd>

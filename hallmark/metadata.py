@@ -507,6 +507,48 @@ def _drop_child(body: bytes, kind: bytes) -> bytes:
     return bytes(kept)
 
 
+def strip_visible(data: bytes, media_type: str) -> bytes:
+    """Remove the credit a file browser displays, leaving the media alone.
+
+    This is what a platform does to an upload, and it is worth being able to
+    demonstrate rather than only warn about. Not a repair and not a cleaner:
+    the result is a file whose picture and sound are untouched and whose
+    provenance record no longer matches it, because the credit was written
+    before the file was hashed and is therefore inside what the record covers.
+
+    Returns the input unchanged when there is nothing of the sort to remove, so
+    a caller can tell the difference between "removed it" and "there was none".
+    """
+    if media_type.startswith("video/"):
+        return _strip_udta(data)
+
+    if media_type in ("image/jpeg", "image/jpg"):
+        # Walk the marker segments and drop the APP1 blocks, which is where
+        # both EXIF and XMP live. Everything else, including the compressed
+        # scan and any credential box, is copied across byte for byte.
+        if not data.startswith(b"\xff\xd8"):
+            return data
+        out = bytearray(data[:2])
+        pos = 2
+        while pos + 4 <= len(data):
+            if data[pos] != 0xFF:
+                break
+            marker = data[pos + 1]
+            # Start of scan: the entropy coded data runs to the end.
+            if marker == 0xDA:
+                break
+            length = struct.unpack(">H", data[pos + 2 : pos + 4])[0]
+            if length < 2 or pos + 2 + length > len(data):
+                return data
+            if marker != 0xE1:
+                out += data[pos : pos + 2 + length]
+            pos += 2 + length
+        out += data[pos:]
+        return bytes(out)
+
+    return data
+
+
 def _read_mp4_visible(path: Path) -> dict[str, str]:
     from mutagen.mp4 import MP4
 

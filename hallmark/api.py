@@ -81,23 +81,32 @@ def showcase() -> JSONResponse:
         return JSONResponse({"error": str(exc), "specimens": [], "attempts": []}, status_code=503)
 
 
-def _stream(key: str, media_type: str, download: bool = False) -> StreamingResponse:
+def _stream(
+    key: str, media_type: str, download: bool = False, private: bool = False
+) -> StreamingResponse:
     """Proxy an object out of the private bucket.
 
     Proxied rather than linked, because the bucket stays private and the point
     of the page is that a visitor can download the real stamped file and check
     it themselves.
+
+    ``private`` matters for anything a visitor made. Showcase assets are the
+    same file for everybody and belong in the shared edge cache; a demo asset
+    belongs to one browser and must not sit in a cache other people are served
+    from. Both are immutable once written, which is only true because a demo
+    run now numbers its objects instead of reusing the same names.
     """
     from hallmark import storage
 
     obj = storage.client().get_object(Bucket=storage.bucket(), Key=key)
     disposition = "attachment" if download else "inline"
+    cache = "private, max-age=3600, immutable" if private else "public, max-age=3600"
     return StreamingResponse(
         obj["Body"].iter_chunks(CHUNK_BYTES),
         media_type=media_type,
         headers={
             "Content-Disposition": f'{disposition}; filename="{Path(key).name}"',
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": cache,
         },
     )
 
@@ -220,7 +229,10 @@ def demo_generate(payload: dict) -> JSONResponse:
 
     try:
         session = demo.start_generation(
-            brief, payload.get("session_id"), payload.get("style")
+            brief,
+            payload.get("session_id"),
+            payload.get("style"),
+            payload.get("kind"),
         )
     except demo.QuotaExceeded as exc:
         # Not an error state for the page: it falls back to replaying a
@@ -275,6 +287,26 @@ def demo_select(payload: dict) -> JSONResponse:
     return JSONResponse(_session_public(session))
 
 
+def _demo_entry(session: dict, name: str) -> dict:
+    """Find one stored asset by filename, across every run in the session.
+
+    Searching only the live candidate list was enough while a session held one
+    run. It no longer does, and the marking record links to assets from every
+    run, so looking in the current one alone would 404 on the visitor's own
+    older files.
+    """
+    from hallmark import demo
+
+    for candidate in session.get("candidates") or []:
+        if (candidate.get("stored_key") or "").endswith(f"/{name}"):
+            return candidate
+    for run in demo.session_runs(session):
+        for asset in run.get("assets") or []:
+            if (asset.get("stored_key") or "").endswith(f"/{name}"):
+                return asset
+    raise HTTPException(status_code=404, detail="No such asset")
+
+
 @app.get("/api/demo/asset/{session_id}/{name}")
 def demo_asset(session_id: str, name: str, download: int = 0) -> StreamingResponse:
     """Stream a stored candidate out of the private bucket.
@@ -289,21 +321,145 @@ def demo_asset(session_id: str, name: str, download: int = 0) -> StreamingRespon
     if session is None:
         raise HTTPException(status_code=404, detail="No such session")
 
-    entry = next(
-        (c for c in session["candidates"] if c.get("stored_key", "").endswith(f"/{name}")),
-        None,
+    entry = _demo_entry(session, name)
+    return _stream(
+        entry["stored_key"],
+        entry.get("media_type") or "image/png",
+        bool(download),
+        private=True,
     )
-    if entry is None:
-        raise HTTPException(status_code=404, detail="No such asset")
-    return _stream(entry["stored_key"], entry.get("media_type") or "image/png", bool(download))
+
+
+def _fetch_demo_asset(session_id: str, name: str) -> tuple[dict, Path, str]:
+    """Pull one of a visitor's assets to a temp file. Caller deletes it."""
+    from hallmark import demo, storage
+
+    session = demo.load_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No such session")
+
+    entry = _demo_entry(session, name)
+    key = entry["stored_key"]
+    handle = tempfile.NamedTemporaryFile(suffix=Path(key).suffix or ".bin", delete=False)
+    path = Path(handle.name)
+    with handle:
+        body = storage.client().get_object(Bucket=storage.bucket(), Key=key)["Body"]
+        for chunk in body.iter_chunks(CHUNK_BYTES):
+            handle.write(chunk)
+    return entry, path, entry.get("media_type") or "application/octet-stream"
+
+
+def _verdict(path: Path, media_type: str) -> dict:
+    """A full verdict for a file on disk, with the readings the page shows."""
+    import hashlib
+
+    result = verify(path)
+    payload = result.to_dict()
+    payload["size_bytes"] = path.stat().st_size
+    payload["raw_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    payload["visible"] = _visible_metadata(path, result.media_type or media_type)
+    payload["provenance"] = _provenance(path, result)
+    return payload
+
+
+@app.get("/api/demo/verify/{session_id}/{name}")
+def demo_verify(session_id: str, name: str) -> JSONResponse:
+    """Check one of a visitor's own assets where it lies.
+
+    A clip off this pipeline is 7 to 18MB and the platform refuses any request
+    body over 4.5MB, so a visitor holding one can never upload it back. The
+    bytes stay in storage and the verdict travels instead.
+
+    ``raw_sha256`` is the hash of the whole stored file before any provenance
+    block is stripped, which is the number the browser can compute over the
+    copy it just downloaded. That is what keeps this from being "trust us": the
+    visitor confirms the checker read the same bytes they are holding.
+    """
+    entry, path, media_type = _fetch_demo_asset(session_id, name)
+    try:
+        payload = _verdict(path, media_type)
+        payload["filename"] = name
+        payload["checked_from"] = "storage"
+        payload["accepted"] = bool(entry.get("accepted"))
+        return JSONResponse(payload)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@app.post("/api/demo/tamper/{session_id}/{name}")
+def demo_tamper(session_id: str, name: str, payload: dict | None = None) -> JSONResponse:
+    """Damage a throwaway copy of a visitor's asset and check that copy.
+
+    The demo asks people to edit a file and watch the record refuse it. For a
+    still the browser does that itself with a canvas, which is better: the
+    visitor holds the evidence. A clip is far too large to move through this
+    platform in either direction, so the edit happens here, on a copy in a temp
+    file that is deleted before the response is sent.
+
+    Nothing stored is touched. Two edits are offered because they fail for
+    different reasons and both are worth seeing:
+
+        byte    one byte flipped deep in the media data. Invisible to anyone
+                watching it. The hash catches it.
+        credit  the visible credit removed from the container, the way a
+                platform strips metadata on upload. The picture and the sound
+                are untouched and it still fails, because the credit was
+                inside the bytes that were hashed at delivery.
+    """
+    from hallmark import metadata
+
+    mode = ((payload or {}).get("mode") or "byte").lower()
+    if mode not in ("byte", "credit"):
+        raise HTTPException(status_code=400, detail="mode must be byte or credit")
+
+    entry, path, media_type = _fetch_demo_asset(session_id, name)
+    edited = Path(f"{path}.edited{path.suffix}")
+    try:
+        data = bytearray(path.read_bytes())
+        if mode == "byte":
+            # Late in the file, inside the media data. The record sits near the
+            # front, so it stays readable and stays valid: a good record over
+            # changed content is exactly the case worth showing.
+            at = int(len(data) * 0.8)
+            data[at] ^= 0xFF
+            edited.write_bytes(bytes(data))
+            described = "one byte flipped inside the media data"
+        else:
+            stripped = metadata.strip_visible(bytes(data), media_type)
+            if stripped == bytes(data):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This file carries no visible credit to remove",
+                )
+            edited.write_bytes(stripped)
+            described = "the visible credit removed from the file"
+
+        result = _verdict(edited, media_type)
+        result["filename"] = f"edited-{name}"
+        result["edit"] = described
+        result["mode"] = mode
+        result["size_before"] = len(data)
+        return JSONResponse(result)
+    finally:
+        path.unlink(missing_ok=True)
+        edited.unlink(missing_ok=True)
 
 
 @app.get("/api/demo/styles")
 def demo_styles() -> dict:
-    """The style presets the page offers."""
+    """The style presets and media kinds the page offers."""
     from hallmark import demo
 
-    return {"styles": demo.style_choices(), "default": demo.DEFAULT_STYLE}
+    return {
+        "styles": demo.style_choices(),
+        "default": demo.DEFAULT_STYLE,
+        "kinds": demo.kind_choices(),
+        "default_kind": demo.DEFAULT_KIND,
+        # Below this a file can be uploaded back for checking; at or above it
+        # the page has to check it where it lies. The page needs the number so
+        # it can choose the right route instead of bouncing off a 413.
+        "uploadable_max_bytes": demo.UPLOADABLE_MAX_BYTES,
+    }
 
 
 @app.get("/api/demo/quota")
@@ -319,8 +475,13 @@ def _session_public(session: dict) -> dict:
     The brief is the visitor's own words so it stays, but the expanded prompt
     sent to the model is exactly what this product promises to withhold.
     """
+    from hallmark import demo
+
     return {
         "session_id": session["session_id"],
+        "run_seq": session.get("run_seq", 1),
+        "kind": session.get("kind", demo.DEFAULT_KIND),
+        "kind_label": session.get("kind_label"),
         "brief": session["brief"],
         "style": session.get("style"),
         "style_label": session.get("style_label"),
@@ -331,6 +492,9 @@ def _session_public(session: dict) -> dict:
         "manifest_uri": session.get("manifest_uri"),
         "canonical_hash": session.get("canonical_hash"),
         "selection": session.get("selection"),
+        # What this browser has made in total, across every run. The page
+        # shows the current run and points at a record covering all of it.
+        "totals": demo.session_totals(session),
         "candidates": [
             {
                 "index": c["index"],
@@ -344,6 +508,10 @@ def _session_public(session: dict) -> dict:
                 "accepted": c.get("accepted", False),
                 "reason": c.get("reason"),
                 "media_type": c.get("media_type", "image/png"),
+                # Whether the page can post this file back for checking, or
+                # has to check it where it lies. A clip is never uploadable.
+                "uploadable": (c.get("size_bytes") or 0) < demo.UPLOADABLE_MAX_BYTES,
+                "name": Path(c["stored_key"]).name if c.get("stored_key") else None,
                 "asset": (
                     f"/api/demo/asset/{session['session_id']}/{Path(c['stored_key']).name}"
                     if c.get("stored_key")
@@ -399,37 +567,47 @@ def _sheet(run_id: str) -> tuple[dict, str]:
 
 
 def _session_sheet(session_id: str) -> tuple[dict, str]:
-    """The marking record for one visitor's own run.
+    """The marking record for everything one browser has generated.
 
-    Marks are measured by reading the stored files, not by trusting what the
-    selection step meant to do. It costs a few reads per request, and it is the
-    whole point: a sheet nobody checked is a sheet nobody should believe.
+    Scope is the session, not a run. Somebody who generates stills, then a
+    clip, then stills again holds nine files and needs one document covering
+    all of them.
+
+    Marks for the newest run are measured here, by reading the stored files,
+    because that is the run the visitor just made and the one they will check.
+    Earlier runs report what was measured off the same files at delivery. That
+    split is not a shortcut for its own sake: re-reading every asset of every
+    run means pulling clips of 7 to 18MB each inside a function that dies at 60
+    seconds, and a sheet that times out reports nothing at all. The row says
+    which of the two it is.
     """
     from hallmark import compliance, demo, storage
 
     session = demo.load_session(session_id)
-    if session is None or session.get("status") != "selected":
+    runs = demo.session_runs(session) if session else []
+    if session is None or not runs:
         raise HTTPException(status_code=404, detail="No completed run under that id")
 
     marks: dict[str, dict[str, bool]] = {}
-    for candidate in session.get("candidates") or []:
-        key = candidate.get("stored_key")
+    for asset in runs[-1].get("assets") or []:
+        key = asset.get("stored_key")
         if not key:
             continue
-        suffix = Path(key).suffix or ".bin"
-        handle = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        handle = tempfile.NamedTemporaryFile(suffix=Path(key).suffix or ".bin", delete=False)
         tmp_path = Path(handle.name)
         try:
             with handle:
                 body = storage.client().get_object(Bucket=storage.bucket(), Key=key)["Body"]
                 for chunk in body.iter_chunks(CHUNK_BYTES):
                     handle.write(chunk)
-            marks[key] = compliance.marks_for(tmp_path, candidate.get("media_type", ""))
+            marks[key] = compliance.marks_for(tmp_path, asset.get("media_type", ""))
+        except Exception:  # noqa: BLE001 - fall back to what delivery measured
+            pass
         finally:
             tmp_path.unlink(missing_ok=True)
 
     base = os.environ.get("HALLMARK_VERIFY_BASE", "").rstrip("/")
-    return compliance.from_session(session, marks), base
+    return compliance.from_session(session, runs, marks), base
 
 
 @app.get("/compliance/session/{session_id}", response_class=HTMLResponse)

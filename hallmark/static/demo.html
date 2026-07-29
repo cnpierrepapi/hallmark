@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HALLMARK / the demo</title>
-<meta name="description" content="Generate three images, pick one and say why, prove it, edit it so you can see the change, then watch the proof refuse it. The rejects are kept.">
+<meta name="description" content="Generate stills or a clip, pick one and say why, prove it, edit it so you can see the change, then watch the proof refuse it. The rejects are kept.">
 <link rel="stylesheet" href="/hallmark.css">
 <style>
   .wrap { padding-bottom: 14vh; }
@@ -36,7 +36,7 @@
   .hint { color: var(--faint); font-size: 12px; margin-top: 12px; }
   .status { color: var(--dim); margin-top: 14px; min-height: 1.5em; }
 
-  /* ---- style presets --------------------------------------------------- */
+  /* ---- what to make, and how it should look ---------------------------- */
   .styles { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 8px; margin: 16px 0 20px; }
   .styleopt {
     border: 1px solid var(--rule); padding: 12px 14px; cursor: pointer;
@@ -44,22 +44,28 @@
   }
   .styleopt:hover { border-color: var(--dim); }
   .styleopt.on { border-color: var(--struck); background: rgba(201,162,39,.08); }
+  .styleopt.out { opacity: .42; cursor: not-allowed; }
+  .styleopt.out:hover { border-color: var(--rule); }
   .styleopt .nm { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
   .styleopt.on .nm { color: var(--struck-lit); }
   .styleopt .ds { font-size: 11.5px; color: var(--faint); margin-top: 5px; }
+
+  .kinds { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
 
   .ideas { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
   .idea { font-size: 11px; color: var(--dim); border: 1px solid var(--rule); padding: 5px 11px; cursor: pointer; border-radius: 999px; }
   .idea:hover { border-color: var(--dim); color: var(--ink); }
 
-  /* ---- three candidates, big --------------------------------------------- */
+  /* ---- the candidates, big --------------------------------------------- */
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 14px; margin-top: 22px; }
+  .grid.wide { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
   .cand { position: relative; }
   .cand .frame {
     position: relative; aspect-ratio: 1/1; background: var(--deep);
     border: 1px solid var(--rule); overflow: hidden; cursor: pointer;
   }
-  .cand .frame img { width: 100%; height: 100%; object-fit: cover; transition: transform .45s, filter .3s; }
+  .grid.wide .cand .frame { aspect-ratio: 16/9; }
+  .cand .frame img, .cand .frame video { width: 100%; height: 100%; object-fit: cover; transition: transform .45s, filter .3s; }
   .cand .frame:hover img { transform: scale(1.04); }
   .cand.pending .frame { display: grid; place-items: center; }
   .cand .spin { width: 24px; height: 24px; border: 2px solid var(--faint); border-top-color: var(--struck); border-radius: 50%; animation: spin 1s linear infinite; }
@@ -71,7 +77,7 @@
     background: var(--pass); color: var(--deep); font-size: 10px;
     letter-spacing: .18em; text-transform: uppercase; text-align: center; padding: 4px;
   }
-  .cand.rejected .frame img { filter: grayscale(.72) brightness(.6); }
+  .cand.rejected .frame img, .cand.rejected .frame video { filter: grayscale(.72) brightness(.6); }
   .cand.failed .frame { display: grid; place-items: center; color: var(--fail); font-size: 11px; }
   .cand .note { margin-top: 10px; font-size: 12px; color: var(--warn); line-height: 1.5; }
   .cand.chosen .note { color: var(--pass); }
@@ -88,6 +94,7 @@
   /* ---- edit ------------------------------------------------------------- */
   .edits { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-top: 8px; }
   .editset { border: 1px solid var(--rule); padding: 16px; }
+  .editset.armed { border-color: var(--struck); }
   .editset h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); }
   .editset p { margin: 0 0 14px; font-size: 12px; color: var(--faint); }
   .editset .btns { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -95,16 +102,17 @@
 
   .sidebyside { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 24px; }
   .sidebyside figure { margin: 0; }
-  .sidebyside img { border: 1px solid var(--rule); width: 100%; }
+  .sidebyside img, .sidebyside video { border: 1px solid var(--rule); width: 100%; }
   .sidebyside .after img { border-color: var(--fail); }
   .sidebyside figcaption { margin-top: 8px; font-size: 11.5px; color: var(--dim); }
   .sidebyside .after figcaption { color: var(--fail); }
+  .armnote { margin-top: 20px; border-left: 2px solid var(--struck); padding-left: 14px; font-size: 12.5px; color: var(--dim); }
 
   /* ---- inventory --------------------------------------------------------- */
   .invrow { display: grid; grid-template-columns: 108px 1fr; gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--rule); align-items: start; }
-  .invrow img { width: 108px; height: 108px; object-fit: cover; border: 1px solid var(--rule); }
-  .invrow.kept img { border-color: var(--pass); }
-  .invrow.lost img { filter: grayscale(.7) brightness(.62); }
+  .invrow img, .invrow video { width: 108px; height: 108px; object-fit: cover; border: 1px solid var(--rule); background: var(--deep); }
+  .invrow.kept img, .invrow.kept video { border-color: var(--pass); }
+  .invrow.lost img, .invrow.lost video { filter: grayscale(.7) brightness(.62); }
   .invrow .tag { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; }
   .invrow.kept .tag { color: var(--pass); }
   .invrow.lost .tag { color: var(--dim); }
@@ -139,11 +147,11 @@
 
   <div class="opener">
     <div>
-      <p class="label">six steps, nothing pre-recorded</p>
+      <p class="label">seven steps, nothing pre-recorded</p>
       <h1 class="display">Make one. Then try<br>to fake it<em>.</em></h1>
     </div>
     <div class="aside">
-      <p>Three images from your brief. You pick one and say why.</p>
+      <p>Stills or a clip from your brief. You pick one and say why.</p>
       <p>It is signed, and the signature goes in the file where your computer can show it.</p>
       <p>Then you edit it, and the proof stops agreeing.</p>
     </div>
@@ -155,17 +163,20 @@
     <div>
       <h2>Say what you want, and how it should look.</h2>
       <p class="say">
-        Three images, one brief, one house style, submitted together. Same instruction
+        One brief, one house style, every candidate submitted together. Same instruction
         every time, and <strong>they will not all come back equally good</strong>. That is
         the whole reason a gate exists.
       </p>
+
+      <p class="label">what to make</p>
+      <div class="styles kinds" id="kinds"></div>
 
       <p class="label">house style</p>
       <div class="styles" id="styles"></div>
 
       <div class="briefbar">
         <input type="text" id="brief" maxlength="300" placeholder="a bottle of cold brew on wet stone" autocomplete="off">
-        <button class="primary" id="btnGen">Generate 3</button>
+        <button class="primary" id="btnGen">Generate</button>
       </div>
       <div class="ideas" id="ideas"></div>
       <p class="hint">The style is a preset, so the full prompt is ours and stays withheld. Your brief is your own words and is shown back to you.</p>
@@ -181,7 +192,7 @@
       <h2>You choose. Say why in your own words.</h2>
       <p class="say">
         Click the one you want and write the reason you picked it.
-        <strong>No model here can see an image</strong>, so nothing pretends to judge your
+        <strong>No model here can see a picture</strong>, so nothing pretends to judge your
         taste. Your reason is what the rejection notes are written from: say the stance was
         better and the notes answer on stance, not on file sizes.
       </p>
@@ -201,7 +212,7 @@
     <div>
       <h2>Check it against its own record.</h2>
       <p class="say">
-        The chosen image carries a hash and a reference struck into the file, plus your
+        The chosen file carries a hash and a reference struck into it, plus your
         sign-off written where a file browser will show it. Nothing is taken on trust: the
         checker re-hashes the exact bytes you would download.
       </p>
@@ -217,6 +228,7 @@
         <div class="row"><dt>Signed off by</dt><dd id="pWho"></dd></div>
         <div class="row"><dt>Style</dt><dd id="pStyle"></dd></div>
         <div class="row"><dt>Prompt</dt><dd id="pPrompt"></dd></div>
+        <div class="row hidden" id="rowSameBytes"><dt>Your copy</dt><dd id="pSame"></dd></div>
       </dl>
 
       <div class="visible hidden" id="visiblePanel">
@@ -242,7 +254,7 @@
         Two kinds of edit, and the record refuses both. <strong>The record itself stays
         valid</strong> the whole time. It simply stops describing this file.
       </p>
-      <div class="edits">
+      <div class="edits" id="editsImage">
         <div class="editset">
           <h4>An edit you can see</h4>
           <p>The sort of thing that happens between approval and publication, every day.</p>
@@ -259,6 +271,32 @@
           </div>
         </div>
       </div>
+
+      <div class="edits hidden" id="editsVideo">
+        <div class="editset" id="setCredit">
+          <h4>Take the credit out</h4>
+          <p>What a platform does to your file on upload. Not one frame changes, and it
+             still fails, because the credit was inside the bytes that were hashed.</p>
+          <div class="btns">
+            <button class="danger" id="btnStripCredit" disabled>Strip the credit</button>
+          </div>
+        </div>
+        <div class="editset" id="setByteVideo">
+          <h4>An edit you cannot see</h4>
+          <p>One byte, deep in the video data. Nobody watching it would notice.</p>
+          <div class="btns">
+            <button class="danger" id="btnByteVideo" disabled>Flip one byte</button>
+          </div>
+        </div>
+      </div>
+      <p class="hint hidden" id="videoEditNote">
+        A clip off this pipeline is well past the size this platform will accept in a
+        request, so it never leaves storage. The edit is made on a throwaway copy that is
+        deleted before the answer comes back. Nothing you generated is touched.
+      </p>
+
+      <div class="armnote hidden" id="armNote"></div>
+
       <div class="sidebyside hidden" id="compare">
         <figure><img id="imgBefore" alt="the file as published"><figcaption>as published and signed</figcaption></figure>
         <figure class="after"><img id="imgAfter" alt="the file after editing"><figcaption id="afterCap">after your edit</figcaption></figure>
@@ -277,6 +315,7 @@
       <dl class="rows hidden" id="badRows" style="margin-top:20px;max-width:800px">
         <div class="row"><dt>Hash now</dt><dd id="bNow"></dd></div>
         <div class="row"><dt>Hash recorded</dt><dd id="bRec"></dd></div>
+        <div class="row"><dt>What changed</dt><dd id="bEdit"></dd></div>
         <div class="row"><dt>Record itself</dt><dd id="bMan"></dd></div>
       </dl>
     </div>
@@ -288,10 +327,10 @@
     <div>
       <h2>The rejects are the interesting part.</h2>
       <p class="say">
-        Every attempt is kept in storage, not just the winner. Acceptance rates, latency
-        and what a usable asset really costs are unknowable if you bin the failures. Note
-        that only the chosen one is signed: download a reject and its properties are bare,
-        because nobody approved it.
+        Every attempt from this run is kept in storage, not just the winner. Acceptance
+        rates, latency and what a usable asset really costs are unknowable if you bin the
+        failures. Note that only the chosen one is signed: download a reject and its
+        properties are bare, because nobody approved it.
       </p>
       <div id="inventory"></div>
       <p class="hint" id="invMeta"></p>
@@ -305,16 +344,18 @@
       <h2>Now take the paperwork with you.</h2>
       <p class="say">
         From 2 August 2026 an output like this has to be marked in a machine readable way,
-        and someone eventually has to show that it was. This run has its own marking record:
-        every asset you just made, <strong>which marks each one actually carries measured by
-        reading the file</strong>, the hash to check it by, and what the record does not
-        claim. The two nobody picked are on it too, carrying nothing, because that is true.
+        and someone eventually has to show that it was. This record covers
+        <strong>everything you have generated in this browser</strong>, not just the run
+        above, so go back to step 1 and make something else and it grows. For each file it
+        gives <strong>which marks it actually carries, measured by reading it</strong>, the
+        hash to check it by, and what the record does not claim. The ones nobody picked are
+        on it too, carrying nothing, because that is true.
       </p>
       <div class="acts" id="sheetActs" style="display:none">
         <a class="btn primary" id="sheetLink" href="#" target="_blank" rel="noopener">Open the marking record &rarr;</a>
         <a class="btn" id="sheetDl" href="#">Download it</a>
       </div>
-      <p class="hint" id="sheetHint">Pick an image first and this appears.</p>
+      <p class="hint" id="sheetHint">Pick something first and this appears.</p>
     </div>
   </section>
 
@@ -328,13 +369,14 @@
   </p>
   <p style="margin-top:14px">
     Generated through GMI Cloud, orchestrated with Genblaze, stored on Backblaze B2.
-    <a href="/">what this is</a> · <a href="/health">status</a>
+    <a href="/">what this is</a> &middot; <a href="/health">status</a>
   </p>
 </footer>
 
 <script>
 const el = id => document.getElementById(id);
 const set = (id, v) => { const n = el(id); if (n) n.textContent = (v === null || v === undefined || v === '') ? '-' : v; };
+const show = (id, on) => { const n = el(id); if (n) n.classList.toggle('hidden', !on); };
 
 const IDEAS = [
   'a bottle of cold brew on wet stone',
@@ -346,9 +388,13 @@ const IDEAS = [
 let SESSION = null;
 let PICKED = null;
 let STYLE = null;
+let KIND = 'image';
+let KINDS = {};
+let QUOTA = null;
 let ORIGINAL = null;   // bytes of the signed file, as delivered
-let EDITED = null;     // bytes after the visitor edits it
+let EDITED = null;     // bytes after the visitor edits it, for anything we can hold
 let EDITED_TYPE = 'image/jpeg';
+let EDIT_MODE = null;  // for a clip, which edit the server should make
 let POLLER = null;
 
 const KEY = 'hallmark.session';
@@ -368,29 +414,79 @@ function say(id, msg, isErr) {
 
 function chosen() { return SESSION && SESSION.candidates.find(c => c.accepted); }
 function mimeOf(c) { return (c && c.media_type) || 'image/jpeg'; }
-function extOf(type) { return type === 'image/png' ? 'png' : 'jpg'; }
+function isVideoType(type) { return (type || '').startsWith('video/'); }
+function isVideo() { return (SESSION ? SESSION.kind : KIND) === 'video'; }
+function noun() { return isVideo() ? 'clip' : 'image'; }
+function extOf(type) {
+  if (isVideoType(type)) return 'mp4';
+  return type === 'image/png' ? 'png' : 'jpg';
+}
 
-/* ---- style presets ---------------------------------------------------- */
-async function loadStyles() {
+/* A clip is far past the size the platform accepts in a request body, so it can
+   never be posted back for checking. The page has to know which route to take
+   before it takes it, rather than discovering it as a 413. */
+function canUpload(c) { return c && c.uploadable !== false && !isVideoType(mimeOf(c)); }
+
+/* ---- what to make, and how it should look ------------------------------ */
+async function loadOptions() {
   try {
     const data = await (await fetch('/api/demo/styles')).json();
     STYLE = data.default;
-    const host = el('styles');
-    host.innerHTML = '';
-    data.styles.forEach(s => {
-      const node = document.createElement('div');
-      node.className = 'styleopt' + (s.slug === STYLE ? ' on' : '');
-      node.innerHTML = `<div class="nm"></div><div class="ds"></div>`;
-      node.querySelector('.nm').textContent = s.label;
-      node.querySelector('.ds').textContent = s.note;
-      node.addEventListener('click', () => {
-        STYLE = s.slug;
-        document.querySelectorAll('.styleopt').forEach(n => n.classList.remove('on'));
-        node.classList.add('on');
-      });
-      host.appendChild(node);
+    KIND = data.default_kind || 'image';
+    (data.kinds || []).forEach(k => { KINDS[k.slug] = k; });
+
+    paint('kinds', data.kinds || [], k => k.slug, () => KIND, slug => {
+      KIND = slug;
+      reflectKind();
     });
-  } catch (e) { /* the default preset applies server side anyway */ }
+    paint('styles', data.styles || [], s => s.slug, () => STYLE, slug => { STYLE = slug; });
+    reflectKind();
+  } catch (e) { /* the defaults apply server side anyway */ }
+}
+
+function paint(hostId, items, slugOf, current, onPick) {
+  const host = el(hostId);
+  if (!host) return;
+  host.innerHTML = '';
+  items.forEach(item => {
+    const node = document.createElement('div');
+    node.className = 'styleopt' + (slugOf(item) === current() ? ' on' : '');
+    node.dataset.slug = slugOf(item);
+    node.innerHTML = '<div class="nm"></div><div class="ds"></div>';
+    node.querySelector('.nm').textContent = item.label;
+    node.querySelector('.ds').textContent = item.note;
+    node.addEventListener('click', () => {
+      if (node.classList.contains('out')) return;
+      host.querySelectorAll('.styleopt').forEach(n => n.classList.remove('on'));
+      node.classList.add('on');
+      onPick(slugOf(item));
+    });
+    host.appendChild(node);
+  });
+}
+
+/* Video runs on its own, much tighter budget, so the option can be spent while
+   stills are still available. Saying so up front beats letting someone write a
+   brief and then refusing it. */
+function reflectKind() {
+  const spent = QUOTA && QUOTA.can_generate && !QUOTA.can_generate_video;
+  const node = el('kinds').querySelector('[data-slug="video"]');
+  if (node) {
+    node.classList.toggle('out', !!spent);
+    const ds = node.querySelector('.ds');
+    if (ds) {
+      ds.textContent = spent
+        ? 'today\'s video budget is spent, stills still work'
+        : (KINDS.video ? KINDS.video.note : '');
+    }
+    if (spent && KIND === 'video') {
+      KIND = 'image';
+      el('kinds').querySelectorAll('.styleopt').forEach(n =>
+        n.classList.toggle('on', n.dataset.slug === 'image'));
+    }
+  }
+  const count = KINDS[KIND] ? KINDS[KIND].candidates : 3;
+  el('btnGen').textContent = `Generate ${count}`;
 }
 
 IDEAS.forEach(idea => {
@@ -403,8 +499,9 @@ IDEAS.forEach(idea => {
 async function refreshQuota() {
   try {
     const sid = localStorage.getItem(KEY) || '';
-    const q = await (await fetch('/api/demo/quota?session_id=' + encodeURIComponent(sid))).json();
-    set('quotaLabel', `${q.remaining_today} runs left today`);
+    QUOTA = await (await fetch('/api/demo/quota?session_id=' + encodeURIComponent(sid))).json();
+    set('quotaLabel', `${QUOTA.remaining_today} runs left today`);
+    reflectKind();
   } catch (e) { /* the label is cosmetic */ }
 }
 
@@ -414,18 +511,21 @@ el('btnGen').addEventListener('click', async () => {
   if (!brief) { say('genStatus', 'Type what you want to see.', true); return; }
 
   el('btnGen').disabled = true;
-  say('genStatus', 'Submitting three jobs together.');
+  say('genStatus', 'Submitting the jobs together.');
   el('grid').innerHTML = '';
+  resetDownstream();
 
   try {
     const res = await fetch('/api/demo/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ brief, style: STYLE, session_id: localStorage.getItem(KEY) })
+      body: JSON.stringify({ brief, style: STYLE, kind: KIND, session_id: localStorage.getItem(KEY) })
     });
     const data = await res.json();
 
     if (res.status === 429) {
-      say('genStatus', data.detail + '. The budget for today is spent, so nothing new can be generated.', true);
+      say('genStatus', data.detail + '.', true);
+      QUOTA = data.quota || QUOTA;
+      reflectKind();
       el('btnGen').disabled = false;
       return;
     }
@@ -434,7 +534,9 @@ el('btnGen').addEventListener('click', async () => {
     SESSION = data;
     localStorage.setItem(KEY, data.session_id);
     renderCandidates();
-    say('genStatus', 'Rendering. This takes about a minute and a half.');
+    say('genStatus', isVideo()
+      ? 'Rendering. A clip takes about two and a half minutes.'
+      : 'Rendering. This takes about a minute and a half.');
     startPolling();
     refreshQuota();
   } catch (err) {
@@ -442,6 +544,21 @@ el('btnGen').addEventListener('click', async () => {
     el('btnGen').disabled = false;
   }
 });
+
+/* Generating again starts a new run. The steps below belong to the old one, so
+   they are cleared rather than left sitting there describing a file the visitor
+   has moved on from. The marking record keeps both. */
+function resetDownstream() {
+  PICKED = null; ORIGINAL = null; EDITED = null; EDIT_MODE = null;
+  ['proveVerdict', 'proveRows', 'visiblePanel', 'visibleNote', 'badVerdict',
+   'badRows', 'compare', 'armNote', 'rowSameBytes'].forEach(id => show(id, false));
+  ['btnProve', 'btnDisprove', 'btnByte', 'btnRecolour', 'btnPaint',
+   'btnStripCredit', 'btnByteVideo', 'btnPick'].forEach(id => el(id).disabled = true);
+  el('btnDownload').classList.add('hidden');
+  ['s2', 's3', 's4', 's5', 's6'].forEach(id => stepState(id, null));
+  stepState('s1', 'live');
+  say('pickStatus', ''); el('inventory').innerHTML = '';
+}
 
 function startPolling() {
   clearInterval(POLLER);
@@ -457,16 +574,46 @@ function startPolling() {
         clearInterval(POLLER);
         el('btnGen').disabled = false;
         stepState('s1', 'done'); stepState('s2', 'live');
-        say('genStatus', `${ready} images ready. Pick one.`);
+        say('genStatus', `${ready} ${noun()}${ready === 1 ? '' : 's'} ready. Pick one.`);
         el('s2').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     } catch (e) { /* keep polling */ }
   }, 4000);
 }
 
+/* A still is an <img> and a clip is a <video>. Rendering a clip into an image
+   tag gets a broken icon, which is a poor way to show off a working pipeline.
+
+   These are the real assets, not display copies, so a clip is 7 to 18MB and
+   there is no transcoded stand-in: the encoder that makes those is a build
+   time tool and does not ship to the running service. In the grid they play on
+   their own, because the visitor has to watch them to choose one. Everywhere
+   after that they load nothing until hovered, and by then the same URL is
+   already in the browser's cache. */
+function mediaNode(src, type, label, autoplay) {
+  if (isVideoType(type)) {
+    const video = document.createElement('video');
+    video.src = src; video.muted = true; video.loop = true;
+    video.playsInline = true;
+    video.setAttribute('aria-label', label);
+    if (autoplay) {
+      video.autoplay = true; video.preload = 'metadata';
+    } else {
+      video.preload = 'none';
+      video.addEventListener('mouseenter', () => video.play().catch(() => {}));
+      video.addEventListener('mouseleave', () => video.pause());
+    }
+    return video;
+  }
+  const img = document.createElement('img');
+  img.src = src; img.alt = label; img.loading = 'lazy';
+  return img;
+}
+
 function renderCandidates() {
   const grid = el('grid');
   grid.innerHTML = '';
+  grid.classList.toggle('wide', isVideo());
 
   SESSION.candidates.forEach(c => {
     const node = document.createElement('div');
@@ -479,11 +626,7 @@ function renderCandidates() {
     idx.className = 'idx'; idx.textContent = String(c.index + 1);
 
     if (c.status === 'ready') {
-      const img = document.createElement('img');
-      img.src = c.asset || c.url;
-      img.alt = `candidate ${c.index + 1}`;
-      img.loading = 'lazy';
-      frame.appendChild(img);
+      frame.appendChild(mediaNode(c.asset || c.url, mimeOf(c), `candidate ${c.index + 1}`, true));
 
       if (SESSION.selection) {
         node.classList.add(c.accepted ? 'chosen' : 'rejected');
@@ -508,7 +651,7 @@ function renderCandidates() {
     frame.appendChild(idx);
     node.appendChild(frame);
 
-    // The note on why it lost sits under the image it belongs to, not in a
+    // The note on why it lost sits under the file it belongs to, not in a
     // separate list. A rejection you have to go and look up is not a record
     // anyone reads.
     if (SESSION.selection) {
@@ -528,7 +671,9 @@ function renderCandidates() {
 el('btnPick').addEventListener('click', async () => {
   if (PICKED === null) return;
   el('btnPick').disabled = true;
-  say('pickStatus', 'Storing every candidate and signing the one you picked.');
+  say('pickStatus', isVideo()
+    ? 'Storing both clips and signing the one you picked. A clip takes a moment to move.'
+    : 'Storing every candidate and signing the one you picked.');
 
   const signer = el('signer').value.trim();
   if (signer) localStorage.setItem(SIGNER_KEY, signer);
@@ -545,7 +690,7 @@ el('btnPick').addEventListener('click', async () => {
     if (!res.ok) { say('pickStatus', data.detail || 'Could not store.', true); el('btnPick').disabled = false; return; }
 
     SESSION = data;
-    ORIGINAL = null; EDITED = null;
+    ORIGINAL = null; EDITED = null; EDIT_MODE = null;
     renderCandidates();
     renderInventory();
     say('pickStatus', `Stored. Signed off by ${(SESSION.selection || {}).signer || 'Visitor'}.`);
@@ -561,7 +706,18 @@ el('btnPick').addEventListener('click', async () => {
 function armStep3() {
   const c = chosen();
   if (!c) return;
-  ['btnProve', 'btnByte', 'btnRecolour', 'btnPaint'].forEach(b => el(b).disabled = false);
+  el('btnProve').disabled = false;
+
+  const video = isVideoType(mimeOf(c));
+  show('editsImage', !video);
+  show('editsVideo', video);
+  show('videoEditNote', video);
+  if (video) {
+    ['btnStripCredit', 'btnByteVideo'].forEach(b => el(b).disabled = false);
+  } else {
+    ['btnByte', 'btnRecolour', 'btnPaint'].forEach(b => el(b).disabled = false);
+  }
+
   const link = el('btnDownload');
   link.href = c.download || c.asset;
   link.setAttribute('download', `hallmark-signed.${extOf(mimeOf(c))}`);
@@ -582,6 +738,11 @@ async function check(bytes, name, type) {
   return res.json();
 }
 
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 /* ---- 3. check --------------------------------------------------------- */
 el('btnProve').addEventListener('click', async () => {
   el('btnProve').disabled = true;
@@ -589,7 +750,28 @@ el('btnProve').addEventListener('click', async () => {
   const c = chosen();
   const type = mimeOf(c);
   try {
-    const d = await check(await loadOriginal(), `chosen.${extOf(type)}`, type);
+    let d;
+    let sameBytes = null;
+
+    if (canUpload(c)) {
+      d = await check(await loadOriginal(), `chosen.${extOf(type)}`, type);
+    } else {
+      // Too big to post back, so the file stays where it is and the verdict
+      // travels instead. The browser then hashes its own copy and compares,
+      // so this is still not a matter of taking our word for which bytes were
+      // read: it is the same number over the same file, computed twice.
+      d = await (await fetch(
+        `/api/demo/verify/${SESSION.session_id}/${encodeURIComponent(c.name)}`)).json();
+      try {
+        const mine = await sha256Hex(await loadOriginal());
+        sameBytes = mine === d.raw_sha256
+          ? 'your download hashes to the same bytes the checker read'
+          : 'your copy does not match what the checker read, so one of them moved';
+      } catch (e) {
+        sameBytes = 'could not hash your copy in this browser';
+      }
+    }
+
     el('proveVerdict').className = 'verdict ' + d.verdict;
     set('proveLabel', d.verdict); set('proveSaid', d.summary);
     el('proveVerdict').classList.remove('hidden');
@@ -605,6 +787,8 @@ el('btnProve').addEventListener('click', async () => {
     set('pWho', ok ? `${ok.approver}, ${ok.decision} on ${(ok.approved_at || '').slice(0, 10)}` : null);
     set('pStyle', SESSION.style_label);
     set('pPrompt', (d.steps || []).every(s => s.prompt_withheld) ? 'withheld by the publisher' : 'visible');
+    show('rowSameBytes', !!sameBytes);
+    if (sameBytes) set('pSame', sameBytes);
     el('proveRows').classList.remove('hidden');
 
     renderVisible(d.visible, `hallmark-signed.${extOf(type)}`);
@@ -626,8 +810,7 @@ const VISIBLE_LABELS = {
 function renderVisible(visible, filename) {
   const rows = el('visibleRows');
   if (!visible || !Object.keys(visible).length) {
-    el('visiblePanel').classList.add('hidden');
-    el('visibleNote').classList.add('hidden');
+    show('visiblePanel', false); show('visibleNote', false);
     return;
   }
   set('vName', `${filename} Properties`);
@@ -645,19 +828,24 @@ function renderVisible(visible, filename) {
     row.appendChild(dt); row.appendChild(dd);
     rows.appendChild(row);
   });
-  el('visiblePanel').classList.remove('hidden');
-  el('visibleNote').classList.remove('hidden');
+  show('visiblePanel', true); show('visibleNote', true);
 }
 
 /* ---- 4. edit ---------------------------------------------------------- */
-function showCompare(caption) {
-  el('imgBefore').src = chosen().asset;
-  el('imgAfter').src = URL.createObjectURL(new Blob([EDITED], { type: EDITED_TYPE }));
-  set('afterCap', caption);
-  el('compare').classList.remove('hidden');
+function readyToRecheck() {
   el('btnDisprove').disabled = false;
   stepState('s4', 'done'); stepState('s5', 'live');
   el('s5').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function showCompare(caption) {
+  const type = mimeOf(chosen());
+  const before = el('imgBefore');
+  before.src = chosen().asset;
+  el('imgAfter').src = URL.createObjectURL(new Blob([EDITED], { type }));
+  set('afterCap', caption);
+  show('compare', true);
+  readyToRecheck();
 }
 
 async function onCanvas(draw, caption) {
@@ -714,11 +902,41 @@ el('btnByte').addEventListener('click', async () => {
   showCompare('after your edit: one byte flipped, nothing you would notice');
 });
 
+/* A clip is never held in the page, so the edit is described here and made on
+   the server when the visitor asks for the check. Arming it rather than doing
+   it now keeps the order of the steps honest: nothing has been edited or
+   checked until step 5 is clicked. */
+function armVideoEdit(mode, label) {
+  EDIT_MODE = mode;
+  document.querySelectorAll('#editsVideo .editset').forEach(n => n.classList.remove('armed'));
+  el(mode === 'credit' ? 'setCredit' : 'setByteVideo').classList.add('armed');
+  say('armNote', `Ready: ${label} The clip in storage is untouched. The edit is made on a copy when you check it.`);
+  show('armNote', true);
+  readyToRecheck();
+}
+
+el('btnStripCredit').addEventListener('click', () =>
+  armVideoEdit('credit', 'the visible credit will be taken out of a copy of your clip.'));
+el('btnByteVideo').addEventListener('click', () =>
+  armVideoEdit('byte', 'one byte will be flipped deep inside a copy of your clip.'));
+
 /* ---- 5. check again --------------------------------------------------- */
 el('btnDisprove').addEventListener('click', async () => {
   el('btnDisprove').disabled = true;
   try {
-    const d = await check(EDITED, `edited.${extOf(EDITED_TYPE)}`, EDITED_TYPE);
+    let d;
+    if (isVideoType(mimeOf(chosen()))) {
+      if (!EDIT_MODE) { el('btnDisprove').disabled = false; return; }
+      const res = await fetch(
+        `/api/demo/tamper/${SESSION.session_id}/${encodeURIComponent(chosen().name)}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: EDIT_MODE }) });
+      d = await res.json();
+      if (!res.ok) throw new Error(d.detail || 'Could not make that edit');
+    } else {
+      d = await check(EDITED, `edited.${extOf(EDITED_TYPE)}`, EDITED_TYPE);
+    }
+
     el('badVerdict').className = 'verdict ' + d.verdict;
     set('badLabel', d.verdict);
     set('badSaid', d.reason || d.summary);
@@ -727,9 +945,10 @@ el('btnDisprove').addEventListener('click', async () => {
     el('bNow').className = 'mismatch';
     set('bNow', d.computed_sha256);
     set('bRec', d.declared_sha256 || 'matches none of the recorded outputs');
+    set('bEdit', d.edit || 'the file you edited in your browser');
     set('bMan', d.verdict === 'unsigned'
       ? 'the edit stripped the record out of the file entirely'
-      : 'still valid; it is the pixels that moved');
+      : 'still valid; it is the content that moved');
     el('badRows').classList.remove('hidden');
 
     stepState('s5', 'done'); stepState('s6', 'live');
@@ -751,10 +970,7 @@ function renderInventory() {
   SESSION.candidates.filter(c => c.asset).forEach(c => {
     const row = document.createElement('div');
     row.className = 'invrow ' + (c.accepted ? 'kept' : 'lost');
-
-    const img = document.createElement('img');
-    img.src = c.asset; img.alt = `candidate ${c.index + 1}`; img.loading = 'lazy';
-    row.appendChild(img);
+    row.appendChild(mediaNode(c.asset, mimeOf(c), `candidate ${c.index + 1}`, false));
 
     const body = document.createElement('div');
     const tag = document.createElement('div');
@@ -790,7 +1006,14 @@ function renderInventory() {
     inv.appendChild(row);
   });
 
-  set('invMeta', `run ${SESSION.run_id || '-'} · record hash ${(SESSION.canonical_hash || '').slice(0, 24)}`);
+  const totals = SESSION.totals || {};
+  const earlier = (totals.runs || 1) - 1;
+  set('invMeta',
+    `run ${SESSION.run_seq || 1} of this browser · record hash `
+    + `${(SESSION.canonical_hash || '').slice(0, 24)}`
+    + (earlier > 0
+        ? ` · ${earlier} earlier run${earlier === 1 ? '' : 's'} kept too, all of it in step 7`
+        : ''));
   renderSheetLinks();
 }
 
@@ -804,15 +1027,20 @@ function renderSheetLinks() {
   el('sheetDl').href = `/compliance/session/${id}/download`;
   el('sheetDl').setAttribute('download', '');
   acts.style.display = '';
+
+  const totals = SESSION.totals || {};
   say('sheetHint',
-    'Built by reading the files in storage when you open it, so it reports what they '
-    + 'carry now rather than what this page intended.');
+    `${totals.assets || 0} file${totals.assets === 1 ? '' : 's'} across `
+    + `${totals.runs || 1} run${totals.runs === 1 ? '' : 's'}, `
+    + `${totals.signed || 0} signed and ${totals.unsigned || 0} not. `
+    + 'The newest run is read out of storage when you open it, so it reports what '
+    + 'those files carry now rather than what this page intended.');
   stepState('s6', 'done'); stepState('s7', 'live');
 }
 
 /* ---- resume ----------------------------------------------------------- */
 (async function boot() {
-  loadStyles();
+  await loadOptions();
   refreshQuota();
   el('signer').value = localStorage.getItem(SIGNER_KEY) || '';
 
@@ -823,6 +1051,10 @@ function renderSheetLinks() {
     if (!res.ok) { renderInventory(); return; }
     SESSION = await res.json();
     el('brief').value = SESSION.brief || '';
+    KIND = SESSION.kind || KIND;
+    el('kinds').querySelectorAll('.styleopt').forEach(n =>
+      n.classList.toggle('on', n.dataset.slug === KIND));
+    reflectKind();
     renderCandidates();
     renderInventory();
     if (SESSION.selection) {

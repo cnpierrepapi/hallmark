@@ -73,8 +73,15 @@ def image_provider(http_timeout: float = SUBMIT_TIMEOUT) -> GMICloudImageProvide
     return GMICloudImageProvider(http_timeout=http_timeout)
 
 
-def video_provider() -> GMICloudVideoProvider:
-    return GMICloudVideoProvider(http_timeout=SUBMIT_TIMEOUT)
+def video_provider(http_timeout: float = SUBMIT_TIMEOUT) -> GMICloudVideoProvider:
+    """A video provider.
+
+    The timeout is a parameter for the same reason it is on the image one: the
+    demo submits from inside a function that dies at 60 seconds, so it gives up
+    on a held-open submit early and recovers the job id from the queue listing
+    instead. A terminal run has no such deadline and keeps the long default.
+    """
+    return GMICloudVideoProvider(http_timeout=http_timeout)
 
 
 def audio_provider() -> GMICloudAudioProvider:
