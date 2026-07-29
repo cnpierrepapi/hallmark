@@ -49,8 +49,8 @@ def main() -> int:
     for tile in tiles:
         slug = tile["slug"]
         kind = tile.get("kind", "image")
-        suffix = ".mp4" if kind == "video" else ".png"
         mime = tile.get("media_type", "image/png")
+        suffix = {"video/mp4": ".mp4", "image/jpeg": ".jpg"}.get(mime, ".png")
         started = time.monotonic()
 
         thumb = client.get(f"{base}/api/thumb/{slug}")
