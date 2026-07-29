@@ -114,12 +114,17 @@ class TestAgainstRealFiles:
         assert found.detail["digital_source_type"] == "trainedAlgorithmicMedia"
         assert found.detail["generator"] == "GPT Image 2"
 
-    def test_an_untrusted_certificate_is_not_reported_as_a_failure(self, firefly_png: Path):
-        """No trust list ships yet, so the honest answer is 'unknown', not 'bad'."""
+    def test_the_shipped_trust_list_vouches_for_a_real_signer(self, firefly_png: Path):
+        """Without the list every credential reads untrusted, Adobe's included."""
         found = provenance.read_c2pa(firefly_png)
-        assert found.trusted is None
-        assert found.detail["untrusted"] is True
+        assert found.trusted is True
+        assert found.detail["untrusted"] is False
         assert found.detail["failures"] == []
+
+    def test_the_trust_list_is_vendored_rather_than_fetched(self):
+        """Verification must not depend on reaching another host mid-request."""
+        for name in ("anchors.pem", "allowed.sha256.txt", "store.cfg"):
+            assert (provenance.TRUST_DIR / name).exists(), f"{name} is not shipped"
 
     def test_a_file_with_no_credential_reads_cleanly(self, tmp_path: Path):
         plain = tmp_path / "plain.jpg"

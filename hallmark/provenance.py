@@ -41,6 +41,42 @@ SYNTHETIC_SOURCE_TYPES = {
 
 # C2PA reports each check by code. These are the ones worth saying out loud.
 _UNTRUSTED = "signingCredential.untrusted"
+_TRUSTED = "signingCredential.trusted"
+
+# The C2PA trust list, vendored so verification does not depend on reaching
+# another host mid-request. Without it every credential comes back untrusted,
+# including Adobe's, because nothing on the machine says whose certificates
+# count. Refreshed from contentcredentials.org/trust.
+TRUST_DIR = Path(__file__).resolve().parent / "trust"
+
+_trust_loaded = False
+
+
+def _load_trust() -> bool:
+    """Point the verifier at the published trust list, once per process."""
+    global _trust_loaded
+    if _trust_loaded:
+        return True
+    try:
+        import warnings
+
+        from c2pa import load_settings
+
+        settings = {
+            "trust": {
+                "trust_anchors": (TRUST_DIR / "anchors.pem").read_text(encoding="utf-8"),
+                "allowed_list": (TRUST_DIR / "allowed.sha256.txt").read_text(encoding="utf-8"),
+                "trust_config": (TRUST_DIR / "store.cfg").read_text(encoding="utf-8"),
+            },
+            "verify": {"verify_trust": True},
+        }
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            load_settings(json.dumps(settings))
+        _trust_loaded = True
+    except Exception:  # noqa: BLE001 - unverified trust beats no answer at all
+        return False
+    return True
 
 
 @dataclass
@@ -116,6 +152,8 @@ def read_c2pa(path: Path) -> Finding:
     except Exception:  # noqa: BLE001 - the checker still works without it
         return Finding("c2pa", present=False, says="Content Credentials could not be read here.")
 
+    _load_trust()
+
     try:
         with Reader(str(path)) as reader:
             report = json.loads(reader.json())
@@ -136,16 +174,30 @@ def read_c2pa(path: Path) -> Finding:
     issuer = signature.get("issuer")
 
     # An untrusted credential is not a failed one. It means the signature holds
-    # but we ship no list saying whose certificates count.
+    # while nothing on the list vouches for the certificate that made it, which
+    # has to read as unknown rather than as bad.
     other_failures = [c for c in codes if c != _UNTRUSTED]
-    trusted = None if _UNTRUSTED in codes else (not other_failures)
+    results = (report.get("validation_results") or {}).get("activeManifest") or {}
+    successes = {s.get("code") for s in results.get("success", [])}
+    if other_failures:
+        trusted = False
+    elif _TRUSTED in successes:
+        trusted = True
+    elif _UNTRUSTED in codes:
+        trusted = None
+    else:
+        trusted = None
 
+    who = issuer or "Someone"
     if other_failures:
         says = "This file carries a Content Credential that does not pass its own checks."
     elif source_type in SYNTHETIC_SOURCE_TYPES:
-        says = f"{issuer or 'Someone'} signed a credential saying this was made by {generator or 'a generative model'}."
+        made_by = generator or "a generative model"
+        says = f"{who} signed a credential saying this was made by {made_by}."
+        if trusted is None:
+            says += " Nothing on our list vouches for that signer."
     else:
-        says = f"{issuer or 'Someone'} signed a credential describing how this file was made."
+        says = f"{who} signed a credential describing how this file was made."
 
     return Finding(
         "c2pa",
