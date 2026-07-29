@@ -45,8 +45,16 @@ TIMESTAMP_AUTHORITY = os.environ.get(
 
 SYNTHETIC = "http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"
 
-# What the format calls the containers we deliver.
-MIME_BY_SUFFIX = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+# What the format calls the containers we deliver. Getting this wrong on the
+# parent is silent: the ingredient is rejected and the whole signing call
+# returns nothing, so the asset ships without a credential and says nothing.
+MIME_BY_SUFFIX = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".mp4": "video/mp4",
+    ".mp3": "audio/mpeg",
+}
 
 
 def _pem(name: str) -> bytes | None:
