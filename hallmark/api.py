@@ -112,16 +112,22 @@ def specimen(modality: str) -> StreamingResponse:
 
 
 @app.get("/api/gallery/{slug}")
-def gallery(slug: str) -> StreamingResponse:
+def gallery(slug: str, download: int = 0) -> StreamingResponse:
     """Stream the full stamped gallery tile. This is what gets verified.
 
     A clip and a still are both real assets here, so the media type comes from
     the record rather than being assumed.
+
+    The download flag matters more than it looks. A tile on the page shows a
+    small WebP so the wall is not thirty megabytes, and a visitor who saves the
+    picture the obvious way gets that thumbnail: no signature, no credential,
+    no properties, because a resized copy is not the asset. Saving has to go
+    through here instead, which serves the real file.
     """
     entry = next((t for t in _showcase().get("gallery", []) if t["slug"] == slug), None)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"No gallery tile {slug}")
-    return _stream(entry["key"], entry.get("media_type", "image/png"))
+    return _stream(entry["key"], entry.get("media_type", "image/png"), bool(download))
 
 
 @app.get("/api/verify-stored/{slug}")
@@ -376,6 +382,58 @@ def stylesheet() -> Response:
 def index() -> HTMLResponse:
     """What the product is and who it is for."""
     return HTMLResponse((STATIC_DIR / "home.html").read_text(encoding="utf-8"))
+
+
+def _sheet(run_id: str) -> tuple[dict, str]:
+    """The marking record for a campaign, and the base URL to link against."""
+    from hallmark import compliance
+
+    showcase = _showcase()
+    published = showcase.get("run_id")
+    if run_id not in ("current", published) or not published:
+        raise HTTPException(status_code=404, detail=f"No marking record for {run_id}")
+
+    base = os.environ.get("HALLMARK_VERIFY_BASE", "").rstrip("/")
+    return compliance.build(showcase), base
+
+
+@app.get("/compliance/{run_id}", response_class=HTMLResponse)
+def compliance_sheet(run_id: str) -> HTMLResponse:
+    """A campaign's marking record, at a URL that keeps working.
+
+    Served as a page rather than only as a file so it can be sent to someone
+    who then checks it, rather than being handed a document that asserts things
+    about assets they have no way to reach.
+    """
+    from hallmark import sheet
+
+    record, base = _sheet(run_id)
+    return HTMLResponse(sheet.render(record, base))
+
+
+@app.get("/compliance/{run_id}/download", response_class=HTMLResponse)
+def compliance_download(run_id: str) -> HTMLResponse:
+    """The same document as a file, for filing.
+
+    One self contained page with the styles inside it, so it survives being
+    emailed, archived or printed with nothing to fetch. Whoever files it holds
+    what they were shown.
+    """
+    from hallmark import sheet
+
+    record, base = _sheet(run_id)
+    name = f"marking-record-{record['run_id'][:8] or 'campaign'}.html"
+    return HTMLResponse(
+        sheet.render(record, base, standalone=True),
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@app.get("/api/compliance/{run_id}")
+def compliance_json(run_id: str) -> JSONResponse:
+    """The same record as data, for anything that would rather read it that way."""
+    record, _ = _sheet(run_id)
+    return JSONResponse(record)
 
 
 @app.get("/demo", response_class=HTMLResponse)
