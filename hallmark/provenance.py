@@ -112,10 +112,16 @@ def _actions(manifest: dict) -> list[dict]:
 
 
 def _source_type(actions: list[dict]) -> str | None:
-    """The IPTC digital source type, wherever the writer chose to put it."""
+    """The IPTC digital source type, wherever the writer chose to put it.
+
+    Version 2 of the actions assertion puts it on the action itself. Adobe
+    writes it as a vendor parameter instead. Reading only one of the two means
+    missing the declaration on roughly half of what arrives.
+    """
     for action in actions:
-        params = action.get("parameters") or {}
-        for key, value in params.items():
+        candidates = dict(action.get("parameters") or {})
+        candidates.update({k: v for k, v in action.items() if k != "parameters"})
+        for key, value in candidates.items():
             if "digitalsourcetype" in key.lower() and isinstance(value, str):
                 return value.rstrip("/").rsplit("/", 1)[-1]
     return None
@@ -128,11 +134,22 @@ def _generator(manifest: dict, actions: list[dict]) -> str | None:
     while the assertion says GPT Image 2. Reporting the first and not the
     second would name the wrong party as the maker.
     """
+    # The model named on the creating action, which is the v2 way to say it.
+    for action in actions:
+        if action.get("action") != "c2pa.created":
+            continue
+        agent = action.get("softwareAgent")
+        name = agent.get("name") if isinstance(agent, dict) else agent
+        if isinstance(name, str) and name:
+            return name
+
+    # Adobe's vendor parameter, which is how credentials in the wild say it.
     for action in actions:
         params = action.get("parameters") or {}
         for key, value in params.items():
             if key.lower().endswith("details") and isinstance(value, str) and value:
                 return value
+
     info = manifest.get("claim_generator_info") or []
     if info and isinstance(info, list) and info[0].get("name"):
         return str(info[0]["name"])

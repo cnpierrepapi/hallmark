@@ -523,7 +523,7 @@ def select_candidate(
     """
     from genblaze_core.models.asset import Asset
 
-    from hallmark import approval, metadata
+    from hallmark import approval, credential, metadata
     from hallmark.approval import Approval
     from hallmark.evaluate import evaluate
     from hallmark.stamp import stamp
@@ -554,6 +554,10 @@ def select_candidate(
         raw["score"] = check.score
         raw["passed"] = check.passed
         raw["local_path"] = str(local)
+        # Kept separately because local_path is repointed at the delivered JPEG
+        # for whichever candidate wins, and the credential needs the render it
+        # was converted from to record as its parent.
+        raw["raw_path"] = str(local)
         return raw
 
     with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
@@ -641,6 +645,16 @@ def select_candidate(
                 mime_type=mime,
             )
             local = stamped
+
+            # Last, because the credential's signature has to cover our pointer
+            # too. The render it was converted from goes in as the parent, so
+            # the provider's signature survives the conversion to JPEG rather
+            # than being thrown away by the encoder.
+            credentialed = workdir / f"chosen_{c['index']}_credentialed{suffix}"
+            if credential.sign(stamped, credentialed, parent=Path(c["raw_path"]),
+                               model=session["model"], approver=signer,
+                               note=reason or None):
+                local = credentialed
         key = f"{SESSION_PREFIX}/{session_id}/{'chosen' if chosen else 'reject'}_{c['index']}{suffix}"
         storage.upload(local, key, mime)
         c["stored_key"] = key
@@ -648,6 +662,7 @@ def select_candidate(
         c["accepted"] = chosen
         c["reason"] = None if chosen else notes.get(str(c["index"]))
         c.pop("local_path", None)
+        c.pop("raw_path", None)
         return c
 
     with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:

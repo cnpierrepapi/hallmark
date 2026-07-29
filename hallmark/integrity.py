@@ -37,6 +37,10 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # JPEG carries the record in an XMP packet, which is where genblaze's own JPEG
 # handler puts it, so a file stamped here is readable by the stock SDK too.
 XMP_APP1_HEADER = b"http://ns.adobe.com/xap/1.0/\x00"
+
+# A C2PA manifest travels in JPEG as JUMBF boxes inside APP11 segments, each
+# one opening with this two byte identifier.
+JUMBF_APP11_PREFIX = b"JP"
 XMP_MANIFEST_OPEN = "<mf:manifest>"
 XMP_MANIFEST_CLOSE = "</mf:manifest>"
 
@@ -222,18 +226,30 @@ def _is_manifest_packet(payload: bytes) -> bool:
 
 
 def _strip_jpeg(data: bytes) -> bytes:
-    """Return JPEG bytes with the genblaze XMP packet removed.
+    """Return JPEG bytes with every provenance box removed, ours and theirs.
 
     Only the packet carrying the record goes. A JPEG delivered by this
     pipeline also holds an XMP packet and an EXIF block describing it in plain
     words, and those were written before the file was hashed: they are part of
     the asset, not decoration on top of it. Removing them here would make an
     unaltered file look altered.
+
+    Content Credentials come out too. A C2PA manifest is added after the file
+    is hashed, because its own signature has to cover everything else in the
+    file including our packet, and the two cannot each be inside the other. So
+    our hash covers the picture and its visible credit, and a credential can be
+    attached or removed without disturbing it.
+
+    That is the right way round. A credential is somebody else's statement
+    about this file, and another party signing or resigning it should not be
+    able to make our record report that the picture changed when it did not.
     """
     out = bytearray()
     cursor = 0
     for start, end, marker, payload in _jpeg_segments(data):
-        if marker == 0xE1 and _is_manifest_packet(payload):
+        ours = marker == 0xE1 and _is_manifest_packet(payload)
+        credential = marker == 0xEB and payload.startswith(JUMBF_APP11_PREFIX)
+        if ours or credential:
             out += data[cursor:start]
             cursor = end
     out += data[cursor:]

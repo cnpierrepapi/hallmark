@@ -40,7 +40,7 @@ from genblaze_core.models.policy import EmbedPolicy  # noqa: E402
 from genblaze_core.models.run import Run  # noqa: E402
 from genblaze_core.models.step import Step  # noqa: E402
 
-from hallmark import approval, ledger, metadata, storage  # noqa: E402
+from hallmark import approval, credential, ledger, metadata, storage  # noqa: E402
 from hallmark.approval import Approval  # noqa: E402
 from hallmark.evaluate import evaluate  # noqa: E402
 from hallmark.ledger import Attempt  # noqa: E402
@@ -254,6 +254,7 @@ def _deliver(slug: str, title: str, hero: bool, raw: Path, model: str, prompt: s
         "hero": hero,
         "model": model,
         "prompt": prompt,
+        "raw": raw,
         "delivered": delivered,
         "sha256": hashlib.sha256(body).hexdigest(),
         "size_bytes": len(body),
@@ -309,6 +310,15 @@ def _publish(kind: str, modality: Modality, passed: list[dict],
             policy=EmbedPolicy(embed_mode="pointer", prompt_visibility=PromptVisibility.PRIVATE),
             mime_type=out_mime,
         )
+
+        # The credential goes on last, because its signature covers everything
+        # else in the file including our pointer. It carries the render it came
+        # from as its parent, so the provider's own signature travels with the
+        # delivered file instead of being destroyed by the conversion.
+        signed = OUT / f"{p['slug']}_credentialed{out_suffix}"
+        if credential.sign(stamped, signed, parent=p["raw"], model=p["model"],
+                           approver=APPROVER, note=APPROVAL_NOTE):
+            stamped = signed
 
         key = f"showcase/gallery/{p['slug']}{out_suffix}"
         storage.upload(stamped, key, out_mime)
