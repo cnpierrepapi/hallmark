@@ -16,6 +16,11 @@ mutagen==1.48.1
 httpx==0.28.1
 boto3==1.43.57
 botocore==1.43.57
+# Reads Content Credentials, so the checker can answer for a file it did not
+# make. Without it the only verdict a stranger's file can reach is "unsigned",
+# including files carrying a valid signed credential from whoever generated
+# them. Ships a native library, so it is the heaviest thing here by far.
+c2pa-python==0.37.2
 fastapi==0.140.7
 python-multipart==0.0.20
 python-dotenv==1.0.1

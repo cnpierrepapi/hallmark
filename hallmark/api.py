@@ -384,6 +384,34 @@ def demo_page() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "demo.html").read_text(encoding="utf-8"))
 
 
+def _provenance(path: Path, result) -> dict:
+    """Read the file every way we can, not only for a record of our own.
+
+    A file handed over by a stranger is the case the checker exists for, and
+    until now the only verdict it could reach was "unsigned", including for
+    files carrying a perfectly good credential from whoever generated them.
+    """
+    try:
+        from hallmark import provenance
+
+        ours = provenance.Finding(
+            source="hallmark",
+            present=result.verdict != "unsigned",
+            signed=result.verdict in ("verified", "altered"),
+            trusted=result.verdict == "verified",
+            says={
+                "verified": "This file carries our record and its bytes still match it.",
+                "altered": "This file carries our record, but the bytes have changed since.",
+                "broken": "This file carries a record of ours that fails its own check.",
+                "unsigned": "No record of ours is attached to this file.",
+            }.get(result.verdict, ""),
+            detail={"verdict": result.verdict},
+        )
+        return provenance.inspect(path, result.media_type or "", ours)
+    except Exception:  # noqa: BLE001 - a verdict must not hinge on the extras
+        return {}
+
+
 def _visible_metadata(path: Path, media_type: str) -> dict[str, str]:
     """What a file browser would show for this file.
 
@@ -431,6 +459,7 @@ async def api_verify(file: UploadFile = File(...)) -> JSONResponse:
         payload["filename"] = file.filename
         payload["size_bytes"] = written
         payload["visible"] = _visible_metadata(tmp_path, result.media_type)
+        payload["provenance"] = _provenance(tmp_path, result)
         return JSONResponse(payload)
     finally:
         tmp_path.unlink(missing_ok=True)
