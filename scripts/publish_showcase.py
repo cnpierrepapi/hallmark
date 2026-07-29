@@ -158,8 +158,14 @@ def _publish_thumb(slug: str, kind: str = "image") -> str | None:
             return None
         handle = BytesIO(frame)
     else:
-        source = folder / f"{slug}.png"
-        if not source.exists():
+        # Stills are delivered as JPEG so the operating system will show the
+        # signature. Older sets on disk are PNG, so both are accepted here.
+        source = next(
+            (folder / f"{slug}{ext}" for ext in (".jpg", ".png")
+             if (folder / f"{slug}{ext}").exists()),
+            None,
+        )
+        if source is None:
             return None
         handle = source
 
@@ -269,6 +275,13 @@ def main() -> int:
         stills = sum(1 for t in gallery if t["kind"] == "image")
         clips = sum(1 for t in gallery if t["kind"] == "video")
         print(f"  gallery   {len(gallery)} tiles: {stills} stills, {clips} clips")
+
+    # Attempts made on the live page arrive as JSON because the function has no
+    # Parquet writer. Fold them in first, or the summary below reports only the
+    # runs started from this machine.
+    drained = ledger.drain_pending()
+    if drained:
+        print(f"  ledger    folded in {drained} attempts from the live demo")
 
     payload = {
         "run_id": run_id,

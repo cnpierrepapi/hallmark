@@ -14,6 +14,7 @@ it can be queried directly without standing up a database.
 from __future__ import annotations
 
 import io
+import json
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from hallmark import storage
+from hallmark import attempts, storage
 
 LEDGER_PREFIX = "ledger/attempts"
 
@@ -104,6 +105,38 @@ def write(attempts: list[Attempt]) -> str | None:
         ContentType="application/vnd.apache.parquet",
     )
     return key
+
+
+def drain_pending() -> int:
+    """Fold attempts recorded by the live demo into the Parquet ledger.
+
+    The deployed function cannot write Parquet, so it leaves JSON behind (see
+    hallmark/attempts.py). This converts whatever has accumulated, writes it as
+    a normal batch, and removes the JSON only once the batch is safely stored.
+    Crashing in between costs a duplicate import, never a lost attempt.
+    """
+    client = storage.client()
+    paginator = client.get_paginator("list_objects_v2")
+
+    keys: list[str] = []
+    rows: list[Attempt] = []
+    for page in paginator.paginate(Bucket=storage.bucket(), Prefix=attempts.PENDING_PREFIX):
+        for item in page.get("Contents", []):
+            if not item["Key"].endswith(".json"):
+                continue
+            body = client.get_object(Bucket=storage.bucket(), Key=item["Key"])["Body"].read()
+            for row in json.loads(body):
+                row["created_at"] = datetime.fromisoformat(row["created_at"])
+                rows.append(Attempt(**row))
+            keys.append(item["Key"])
+
+    if not rows:
+        return 0
+
+    write(rows)
+    for key in keys:
+        client.delete_object(Bucket=storage.bucket(), Key=key)
+    return len(rows)
 
 
 def read_all() -> pa.Table | None:

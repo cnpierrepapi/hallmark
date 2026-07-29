@@ -28,7 +28,7 @@ from genblaze_core.models.manifest import Manifest
 from genblaze_core.models.run import Run
 from genblaze_core.models.step import Step
 
-from hallmark import storage
+from hallmark import attempts, storage
 
 CANDIDATES = 3
 SESSION_PREFIX = "sessions"
@@ -667,5 +667,32 @@ def select_candidate(
     session["run_id"] = manifest.run.run_id
     session["manifest_uri"] = manifest_uri
     session["canonical_hash"] = manifest.canonical_hash
+
+    # Every candidate goes on the ledger, the two nobody picked included. The
+    # page claims the rejects are kept; until now that was only true of runs
+    # started from a terminal, so the published acceptance rate ignored every
+    # asset the public generated.
+    attempts.record(
+        [
+            {
+                "run_id": manifest.run.run_id,
+                "campaign": "demo",
+                "modality": "image",
+                "model": session["model"],
+                "provider": "gmicloud",
+                "accepted": bool(c["index"] == picked),
+                "score": float(c.get("score") or 0.0),
+                "latency_seconds": float(c.get("latency_seconds") or 0.0),
+                "reject_reason": None if c["index"] == picked else c.get("reason"),
+                "cost_usd": None,
+                "sha256": c.get("sha256"),
+                "size_bytes": c.get("size_bytes"),
+                "media_type": c.get("media_type"),
+                "checks": json.dumps(c.get("checks") or []),
+            }
+            for c in stored
+        ]
+    )
+
     save_session(session)
     return session
