@@ -132,6 +132,72 @@ def _publish_display_clip(slug: str) -> str | None:
     return key
 
 
+def _delivered(slug: str) -> Path | None:
+    """The exact file that was uploaded for this tile.
+
+    Signing writes a separate copy, and that copy is what goes to the bucket
+    when it succeeds. Reading the pre-signing file instead would report a
+    credential as missing on every asset that has one.
+    """
+    folder = ROOT / "out" / "gallery"
+    names = [f"{slug}_credentialed{ext}" for ext in (".jpg", ".png", ".mp4")]
+    names += [f"{slug}{ext}" for ext in (".jpg", ".png", ".mp4")]
+    return next((folder / n for n in names if (folder / n).exists()), None)
+
+
+def _content_hash(slug: str, media_type: str) -> str | None:
+    """The hash the checker will compute for this asset, read off the file.
+
+    The number shown on the page has to be the number a visitor gets back from
+    the checker, so it is computed here the same way the checker computes it
+    rather than copied out of the run record. They drifted apart once already,
+    after a set was delivered twice and only one of the two was published.
+    """
+    from hallmark import integrity
+
+    local = _delivered(slug)
+    if local is None:
+        return None
+    try:
+        return integrity.canonical_sha256(local, media_type or None)
+    except Exception:  # noqa: BLE001 - fall back to what the run recorded
+        return None
+
+
+def _delivered_size(slug: str) -> int | None:
+    local = _delivered(slug)
+    return local.stat().st_size if local else None
+
+
+def _marks(slug: str, media_type: str) -> dict[str, bool]:
+    """Which marks a delivered file actually carries, read off the file.
+
+    Measured rather than assumed. The compliance sheet is built from this, and
+    a sheet that reports what the pipeline was supposed to do is worth nothing:
+    the clips shipped without credentials once already, silently, because a
+    parent was offered to the signer under the wrong media type.
+    """
+    from hallmark import integrity, metadata, provenance
+
+    local = _delivered(slug)
+    if local is None:
+        return {}
+
+    def safe(fn, default=False):
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001 - an unreadable mark is a missing mark
+            return default
+
+    return {
+        "credential": safe(lambda: provenance.read_c2pa(local).present),
+        "visible": safe(lambda: bool(metadata.read_visible(local)))
+        if media_type.startswith("image/")
+        else False,
+        "pointer": safe(lambda: bool(integrity.extract_embedded_json(local, media_type))),
+    }
+
+
 def _publish_thumb(slug: str, kind: str = "image") -> str | None:
     """Publish a small WebP for display only.
 
@@ -267,9 +333,11 @@ def main() -> int:
                     "thumb_key": thumb_key,
                     "display_key": display_key,
                     "model": t["model"],
-                    "sha256": t["sha256"],
-                    "size_bytes": t["size_bytes"],
+                    "sha256": _content_hash(t["slug"], t.get("media_type", "")) or t["sha256"],
+                    "size_bytes": _delivered_size(t["slug"]) or t["size_bytes"],
                     "latency_seconds": t["latency_seconds"],
+                    "manifest_uri": t.get("manifest_uri", ""),
+                    "marks": _marks(t["slug"], t.get("media_type", "")),
                 }
             )
         stills = sum(1 for t in gallery if t["kind"] == "image")
