@@ -173,6 +173,7 @@ def verify_stored(slug: str) -> JSONResponse:
         payload["raw_sha256"] = digest.hexdigest()
         payload["checked_from"] = "storage"
         payload["visible"] = _visible_metadata(tmp_path, result.media_type)
+        payload["provenance"] = _provenance(tmp_path, result)
         return JSONResponse(payload)
     finally:
         tmp_path.unlink(missing_ok=True)

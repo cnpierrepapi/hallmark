@@ -101,6 +101,42 @@
   }
   .wallout { padding: 18px 5vw 0; min-height: 2.4em; }
 
+  /* ---- three readings of one file ------------------------------------- */
+  .reads { margin: 20px 0 0; padding: 0; list-style: none; max-width: 820px; }
+  .read {
+    border-top: 1px solid var(--rule-soft); padding: 13px 0 13px 20px;
+    position: relative;
+  }
+  .read::before {
+    content: ''; position: absolute; left: 0; top: 19px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--faint);
+  }
+  .read.found::before { background: var(--struck); box-shadow: 0 0 8px var(--struck); }
+  .read.signed::before { background: var(--pass); box-shadow: 0 0 8px var(--pass); }
+  .read.failed::before { background: var(--fail); box-shadow: 0 0 8px var(--fail); }
+  .read .who {
+    font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--dim); margin: 0 0 5px;
+  }
+  .read .said { margin: 0; color: var(--ink); }
+  .read .said.none { color: var(--faint); }
+  .read .fine { margin: 6px 0 0; color: var(--faint); font-size: 12px; }
+  .headline {
+    font-family: var(--display); font-size: clamp(19px, 2.4vw, 26px);
+    line-height: 1.25; margin: 16px 0 0; max-width: 30ch;
+  }
+  .caveat {
+    margin: 18px 0 0; padding: 12px 0 0; border-top: 1px solid var(--rule-soft);
+    color: var(--dim); font-size: 12.5px; max-width: 70ch;
+  }
+  .keep { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+  .keep a {
+    font-size: 12px; color: var(--dim); text-decoration: none;
+    border-bottom: 1px solid var(--faint); padding-bottom: 2px;
+  }
+  .keep a:hover { color: var(--struck); border-color: var(--struck); }
+
   /* ---- use cases: offset list, alternating indent --------------------- */
   .uses { padding: 10vh 0 8vh; }
   .use { border-top: 1px solid var(--rule); padding: 30px 0 26px; }
@@ -186,6 +222,7 @@
   <nav class="mastnav">
     <a href="/demo">The demo</a>
     <a href="#check">Check a file</a>
+    <a href="/compliance/current">Marking record</a>
     <a href="/health">Status</a>
   </nav>
 </div>
@@ -220,7 +257,8 @@
   <div class="heading">
     <div>
       <p class="label">every one of these is a real signed file</p>
-      <p class="dim" style="margin-top:6px">Stills and clips, generated for this page. Click any tile: it downloads the actual asset and runs it through the checker in front of you.</p>
+      <p class="dim" style="margin-top:6px">Stills and clips, generated for this page. Click any tile: it downloads the actual asset and runs it through the checker in front of you, then offers you the signed file to keep.</p>
+      <p class="faint" style="margin-top:6px;font-size:12.5px">What you see here is a small display copy, so a right click saves that. The stills are delivered as JPEG with the credit inside them, and the save link under each check gives you the real one.</p>
     </div>
     <p class="faint" id="wallCount"></p>
   </div>
@@ -364,10 +402,17 @@
   <section class="check" id="check">
     <p class="label">check any file</p>
     <h2 class="display" style="font-size:clamp(28px,4.2vw,50px);margin-top:10px">Bring your own.</h2>
-    <p class="dim" style="max-width:60ch;margin-top:14px">
-      An image, a video or an audio file, signed by this pipeline or not. Nothing is
-      stored. A file with no record gets told so plainly, which is the honest answer for
-      almost everything on the internet.
+    <p class="dim" style="max-width:64ch;margin-top:14px">
+      An image, a video or an audio file, from this pipeline or from anywhere else.
+      Nothing is stored. The file is read three ways and each one answers separately:
+      our own record, a Content Credential from whoever made or edited it, and any
+      unsigned claim written into the file's metadata.
+    </p>
+    <p class="faint" style="max-width:64ch;margin-top:10px;font-size:12.5px">
+      Credentials from Adobe, Google, OpenAI through Firefly, Microsoft, Truepic and the
+      camera makers are checked against the published trust list that ships with this
+      service. They are never added up into a single verdict on whether something is AI,
+      because no honest tool can produce one.
     </p>
     <label class="drop" id="drop">
       <input type="file" id="file" style="display:none" accept="image/*,video/mp4,audio/*">
@@ -376,6 +421,11 @@
     </label>
     <div class="checkout">
       <div class="verdict hidden" id="cVerdict"><h3 id="cLabel"></h3><p id="cSaid"></p></div>
+      <div class="hidden" id="cProv">
+        <p class="headline" id="cHead"></p>
+        <ul class="reads" id="cReads"></ul>
+        <p class="caveat" id="cCaveat"></p>
+      </div>
       <dl class="rows hidden" id="cRows" style="margin-top:18px;max-width:780px">
         <div class="row"><dt>Hash now</dt><dd id="cNow"></dd></div>
         <div class="row"><dt>Hash recorded</dt><dd id="cRec"></dd></div>
@@ -601,11 +651,65 @@ async function checkTile(node, tile) {
         ${tile.title} · ${(( tile.size_bytes || 0) / 1024 / 1024).toFixed(1)}MB ·
         your sha ${mine.slice(0, 20)} ·
         record ${d.manifest_source && d.manifest_source.startsWith('fetched') ? 'resolved from storage' : d.manifest_source}
-      </p>`;
+      </p>
+      ${readsList(d.provenance)}
+      <div class="keep">
+        <a href="/api/gallery/${tile.slug}?download=1" download>
+          Save the ${clip ? 'clip' : 'JPEG'} with its credential
+        </a>
+        <a href="/compliance/${(SHOWCASE && SHOWCASE.run_id) || 'current'}">Marking record for this campaign</a>
+      </div>`;
   } catch (err) {
     node.classList.remove('checking');
     out.innerHTML = `<p class="err">Could not check that one: ${err.message}</p>`;
   }
+}
+
+/* ---- what the file says about itself ---------------------------------- */
+const SOURCE_NAMES = {
+  hallmark: 'our record',
+  c2pa: 'content credential',
+  claims: 'unsigned metadata',
+};
+
+function readingLine(f) {
+  // A credential that fails its own check is a louder finding than none at
+  // all, so it is coloured as a failure rather than as an absence.
+  const failed = (f.detail && (f.detail.failures || []).length > 0);
+  const state = !f.present ? '' : failed ? ' failed' : f.signed ? ' signed' : ' found';
+
+  const fine = [];
+  if (f.present && f.source === 'c2pa') {
+    if (f.trusted === true) fine.push('signer is on the published trust list');
+    if (f.trusted === false) fine.push('nothing on our list vouches for that signer, which is not an accusation');
+    if (f.detail.signed_at) fine.push('signed ' + f.detail.signed_at.slice(0, 10));
+    if (f.detail.manifests > 1) fine.push(f.detail.manifests + ' manifests, parents included');
+    if (failed) fine.push(f.detail.failures.join(', '));
+  }
+  if (f.present && f.source === 'claims' && f.detail.declared_source_type) {
+    fine.push('nothing signs this, so anyone could have typed it');
+  }
+
+  return `<li class="read${state}">
+    <p class="who">${SOURCE_NAMES[f.source] || f.source}</p>
+    <p class="said${f.present ? '' : ' none'}">${f.says}</p>
+    ${fine.length ? `<p class="fine">${fine.join(' &middot; ')}</p>` : ''}
+  </li>`;
+}
+
+function readsList(prov) {
+  if (!prov || !prov.findings) return '';
+  return `<p class="headline">${prov.summary.headline}</p>
+    <ul class="reads">${prov.findings.map(readingLine).join('')}</ul>`;
+}
+
+function showProvenance(prov) {
+  const box = el('cProv');
+  if (!prov || !prov.findings) { box.classList.add('hidden'); return; }
+  set('cHead', prov.summary.headline);
+  el('cReads').innerHTML = prov.findings.map(readingLine).join('');
+  set('cCaveat', prov.summary.caveat);
+  box.classList.remove('hidden');
 }
 
 /* ---- bring your own file --------------------------------------------- */
@@ -620,6 +724,7 @@ async function checkFile(file) {
   set('cLabel', 'checking'); set('cSaid', `${file.name}, ${Math.round(file.size / 1024)}KB`);
   el('cVerdict').classList.remove('hidden');
   el('cRows').classList.add('hidden');
+  el('cProv').classList.add('hidden');
 
   // Say this plainly rather than letting the request bounce off the platform
   // and return an error page nobody can read.
@@ -640,7 +745,16 @@ async function checkFile(file) {
 
     el('cVerdict').className = 'verdict ' + d.verdict;
     set('cLabel', d.verdict);
-    set('cSaid', d.reason ? `${d.summary} ${d.reason}.` : d.summary);
+    // The verdict is only ever about our own record. A file signed by someone
+    // else is unsigned here and still fully accounted for, so say which
+    // question was just answered before the answer is read as a wider one.
+    const elsewhere = (d.provenance && d.provenance.summary.sources_found || [])
+      .some(s => s !== 'hallmark');
+    set('cSaid', (d.reason ? `${d.summary} ${d.reason}.` : d.summary)
+      + (d.verdict === 'unsigned' && elsewhere
+        ? ' That answers our record only. This file carries provenance from elsewhere, below.'
+        : ''));
+    showProvenance(d.provenance);
 
     const same = d.computed_sha256 && d.computed_sha256 === d.declared_sha256;
     el('cNow').className = same ? 'match' : '';
