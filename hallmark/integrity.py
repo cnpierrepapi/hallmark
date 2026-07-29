@@ -41,6 +41,11 @@ XMP_APP1_HEADER = b"http://ns.adobe.com/xap/1.0/\x00"
 # A C2PA manifest travels in JPEG as JUMBF boxes inside APP11 segments, each
 # one opening with this two byte identifier.
 JUMBF_APP11_PREFIX = b"JP"
+
+# In MP4 the same manifest travels as a top level uuid box with the identifier
+# C2PA reserved for it. Fixed by the specification, so it is written out here
+# rather than imported from the signing library, which is optional at runtime.
+C2PA_BMFF_UUID = bytes.fromhex("d8fec3d61b0e483c92975828877ec481")
 XMP_MANIFEST_OPEN = "<mf:manifest>"
 XMP_MANIFEST_CLOSE = "</mf:manifest>"
 
@@ -121,9 +126,56 @@ def _read_box_size(data: bytes, pos: int) -> tuple[int, int]:
     return size, 8
 
 
+MP4_CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts"}
+MP4_OFFSET_TABLES = {b"stco", b"co64"}
+
+
+def _rewind_chunk_offsets(data: bytearray, start: int, end: int,
+                          removed: list[tuple[int, int]]) -> None:
+    """Undo the offset shift caused by removing boxes, in place.
+
+    A chunk offset says where in the file a run of samples begins, counted from
+    the start of the file. Writing a credential puts fourteen kilobytes ahead of
+    the media, so every one of these numbers moves along while not a single
+    frame changes. Take the credential back out and the numbers are left
+    pointing past where the media now starts.
+
+    So each offset is wound back by however many removed bytes sat in front of
+    it, which puts the clip back to the bytes that were hashed. Nothing is
+    discarded: an offset that genuinely moved still reads as moved, which is the
+    case worth catching.
+    """
+    pos = start
+    while pos + 8 <= end:
+        size, header = _read_box_size(bytes(data), pos)
+        if size < 8 or pos + size > end:
+            return
+        kind = bytes(data[pos + 4 : pos + 8])
+        if kind in MP4_CONTAINERS:
+            _rewind_chunk_offsets(data, pos + header, pos + size, removed)
+        elif kind in MP4_OFFSET_TABLES:
+            width = 8 if kind == b"co64" else 4
+            form = ">Q" if width == 8 else ">I"
+            # version and flags, then the entry count, then the entries.
+            table = pos + header + 8
+            for at in range(table, pos + size - width + 1, width):
+                value = struct.unpack(form, bytes(data[at : at + width]))[0]
+                ahead = sum(n for begins, n in removed if begins < value)
+                if ahead and value >= ahead:
+                    data[at : at + width] = struct.pack(form, value - ahead)
+        pos += size
+
+
 def _strip_mp4(data: bytes) -> bytes:
-    """Return MP4 bytes with the genblaze uuid box removed."""
+    """Return MP4 bytes with every provenance box removed, ours and theirs.
+
+    The C2PA box goes for the same reason it goes in JPEG: a credential is
+    written after the clip has been hashed, because its signature has to cover
+    our own box, and the two cannot each be inside the other. Leaving it in the
+    hash made every credentialed clip report itself as altered.
+    """
     out = bytearray()
+    removed: list[tuple[int, int]] = []
     pos = 0
 
     while pos + 8 <= len(data):
@@ -134,13 +186,16 @@ def _strip_mp4(data: bytes) -> bytes:
         box_type = data[pos + 4 : pos + 8]
         if box_type == b"uuid" and box_size >= header_size + 16:
             box_uuid = data[pos + header_size : pos + header_size + 16]
-            if box_uuid == GENBLAZE_UUID_BYTES:
+            if box_uuid in (GENBLAZE_UUID_BYTES, C2PA_BMFF_UUID):
+                removed.append((pos, box_size))
                 pos += box_size
                 continue
 
         out += data[pos : pos + box_size]
         pos += box_size
 
+    if removed:
+        _rewind_chunk_offsets(out, 0, len(out), removed)
     return bytes(out)
 
 
