@@ -645,6 +645,12 @@ def poll_generation(session_id: str) -> dict:
     return session
 
 
+# How a rejection note came to be worded. Recorded next to the note itself,
+# inside the hash, because the judgement is the reviewer's and the sentence is
+# not, and only one of those two facts is obvious from reading it.
+REASON_FROM_MODEL = "reviewer's reason, worded by a language model"
+REASON_FROM_TEMPLATE = "reviewer's reason, worded from a fixed template"
+
 RATIONALE_SYSTEM = """You write the note filed against each rejected candidate
 in a creative review record.
 
@@ -703,8 +709,13 @@ def _fallback_rationales(session: dict, picked: int, human_reason: str) -> dict[
     return notes
 
 
-def _rationales(session: dict, picked: int, human_reason: str) -> dict[str, str]:
+def _rationales(session: dict, picked: int, human_reason: str) -> tuple[dict[str, str], str]:
     """Ask a text model to explain the rejections from the human's reason.
+
+    Returns the notes and how they were worded. The wording is worth naming on
+    the record: the reviewer supplied the judgement, a language model turned it
+    around into one line per candidate, and a sheet that presented those as
+    sentences a person typed would be claiming something untrue.
 
     The model is told plainly that it has not seen the renders, and it is given
     only the reviewer's words and the measured checks. That keeps the output
@@ -758,11 +769,14 @@ def _rationales(session: dict, picked: int, human_reason: str) -> dict[str, str]
             # A model that answers for only some candidates leaves the rest
             # with no note at all, which reads as an oversight rather than a
             # decision. Fill the gaps rather than showing a blank.
-            return {index: notes.get(index) or default for index, default in fallback.items()}
+            return (
+                {index: notes.get(index) or default for index, default in fallback.items()},
+                REASON_FROM_MODEL,
+            )
     except Exception:  # noqa: BLE001 - the demo must not hinge on the planner
         pass
 
-    return fallback
+    return fallback, REASON_FROM_TEMPLATE
 
 
 def asset_key(session_id: str, run_seq: int, index: int, chosen: bool, suffix: str) -> str:
@@ -874,6 +888,14 @@ def select_candidate(
     chosen_raw["sha256"] = hashlib.sha256(delivery.read_bytes()).hexdigest()
     chosen_raw["size_bytes"] = delivery.stat().st_size
 
+    # The rejection notes are written BEFORE the manifest, because they go
+    # inside it. Written afterwards they were commentary sitting beside the
+    # proof in a mutable JSON object, editable by anyone who could reach the
+    # bucket, while the approver next to them was tamper evident. The reason a
+    # candidate lost is part of the decision, so it is hashed with the rest of
+    # the decision.
+    notes, reason_source = _rationales(session, picked, human_reason)
+
     # One record covering the whole run, so the rejected attempts are inside
     # the provenance rather than thrown away.
     step_modality = Modality.VIDEO if is_video else Modality.IMAGE
@@ -900,7 +922,14 @@ def select_candidate(
                 # The style is a preset name, so it is safe to publish. The
                 # prompt it expands into is not, and stays withheld.
                 params={"style": session.get("style_label", "")},
-                metadata={"candidate": c["index"], "chosen": chosen},
+                metadata={
+                    "candidate": c["index"],
+                    "chosen": chosen,
+                    "decision": "approved" if chosen else "not selected",
+                    "reason": (reason or "picked on the page") if chosen
+                    else notes.get(str(c["index"])),
+                    "reason_source": "written by the reviewer" if chosen else reason_source,
+                },
             )
         )
 
@@ -913,8 +942,6 @@ def select_candidate(
     # Published under a key that carries the run number, for the same reason
     # the assets do: a second run must not overwrite the first run's record.
     manifest_uri = approval.publish_manifest(manifest, f"{session_id}/r{run_seq}")
-
-    notes = _rationales(session, picked, human_reason)
 
     # Store every candidate, chosen or not. The rejects are the inventory.
     def store(c: dict) -> dict:
@@ -955,6 +982,9 @@ def select_candidate(
         c["media_type"] = mime
         c["accepted"] = chosen
         c["reason"] = None if chosen else notes.get(str(c["index"]))
+        # Carried onto the candidate so the inventory and the sheet can say how
+        # the note was worded without reopening the manifest.
+        c["reason_source"] = None if chosen else reason_source
         c.pop("local_path", None)
         c.pop("raw_path", None)
         return c
@@ -1043,6 +1073,7 @@ def _run_record(session: dict) -> dict[str, Any]:
                 "size_bytes": c.get("size_bytes", 0),
                 "score": c.get("score"),
                 "reason": c.get("reason"),
+                "reason_source": c.get("reason_source"),
                 "marks": c.get("marks") or {},
             }
             for c in session.get("candidates") or []

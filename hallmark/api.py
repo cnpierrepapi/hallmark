@@ -507,6 +507,7 @@ def _session_public(session: dict) -> dict:
                 "checks": c.get("checks") or [],
                 "accepted": c.get("accepted", False),
                 "reason": c.get("reason"),
+                "reason_source": c.get("reason_source"),
                 "media_type": c.get("media_type", "image/png"),
                 # Whether the page can post this file back for checking, or
                 # has to check it where it lies. A clip is never uploadable.

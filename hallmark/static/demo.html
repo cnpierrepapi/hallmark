@@ -228,8 +228,18 @@
         <div class="row"><dt>Signed off by</dt><dd id="pWho"></dd></div>
         <div class="row"><dt>Style</dt><dd id="pStyle"></dd></div>
         <div class="row"><dt>Prompt</dt><dd id="pPrompt"></dd></div>
+        <div class="row hidden" id="rowReview"><dt>Also in this record</dt><dd id="pReview"></dd></div>
         <div class="row hidden" id="rowSameBytes"><dt>Your copy</dt><dd id="pSame"></dd></div>
       </dl>
+
+      <div class="visible hidden" id="reviewPanel" style="margin-top:20px">
+        <p class="hint">
+          The record covers the whole review, not just the file that won. Every candidate
+          is in it with what was decided and why, so the notes below cannot be reworded
+          later without this file failing its own check.
+        </p>
+        <div id="reviewList"></div>
+      </div>
 
       <div class="visible hidden" id="visiblePanel">
         <div class="bar">
@@ -332,6 +342,12 @@
         failures. Note that only the chosen one is signed: download a reject and its
         properties are bare, because nobody approved it.
       </p>
+      <p class="say">
+        The note under each one is not a caption. It went into the record before the
+        record was hashed, alongside your name, so rewriting why something lost breaks
+        the signed file in step 3. Each note also says how it was worded: you gave the
+        judgement, a language model turned it into one line per candidate.
+      </p>
       <div id="inventory"></div>
       <p class="hint" id="invMeta"></p>
     </div>
@@ -349,7 +365,8 @@
         above, so go back to step 1 and make something else and it grows. For each file it
         gives <strong>which marks it actually carries, measured by reading it</strong>, the
         hash to check it by, and what the record does not claim. The ones nobody picked are
-        on it too, carrying nothing, because that is true.
+        on it too, carrying nothing, because that is true, and each one carries the note on
+        why it was refused and who worded that note.
       </p>
       <div class="acts" id="sheetActs" style="display:none">
         <a class="btn primary" id="sheetLink" href="#" target="_blank" rel="noopener">Open the marking record &rarr;</a>
@@ -551,7 +568,8 @@ el('btnGen').addEventListener('click', async () => {
 function resetDownstream() {
   PICKED = null; ORIGINAL = null; EDITED = null; EDIT_MODE = null;
   ['proveVerdict', 'proveRows', 'visiblePanel', 'visibleNote', 'badVerdict',
-   'badRows', 'compare', 'armNote', 'rowSameBytes'].forEach(id => show(id, false));
+   'badRows', 'compare', 'armNote', 'rowSameBytes', 'reviewPanel',
+   'rowReview'].forEach(id => show(id, false));
   ['btnProve', 'btnDisprove', 'btnByte', 'btnRecolour', 'btnPaint',
    'btnStripCredit', 'btnByteVideo', 'btnPick'].forEach(id => el(id).disabled = true);
   el('btnDownload').classList.add('hidden');
@@ -787,6 +805,7 @@ el('btnProve').addEventListener('click', async () => {
     set('pWho', ok ? `${ok.approver}, ${ok.decision} on ${(ok.approved_at || '').slice(0, 10)}` : null);
     set('pStyle', SESSION.style_label);
     set('pPrompt', (d.steps || []).every(s => s.prompt_withheld) ? 'withheld by the publisher' : 'visible');
+    renderReview(d.steps || []);
     show('rowSameBytes', !!sameBytes);
     if (sameBytes) set('pSame', sameBytes);
     el('proveRows').classList.remove('hidden');
@@ -801,6 +820,49 @@ el('btnProve').addEventListener('click', async () => {
   }
   el('btnProve').disabled = false;
 });
+
+/* The review as the record holds it. Read off the verified file rather than
+   the session, so what is shown is what a stranger with only this file would
+   get back, which is the whole claim being made. */
+function renderReview(steps) {
+  const list = el('reviewList');
+  const reviewed = steps.filter(s => s.review && s.review.decision);
+  show('reviewPanel', reviewed.length > 1);
+  show('rowReview', reviewed.length > 1);
+  if (reviewed.length < 2) return;
+
+  const refused = reviewed.filter(s => !s.review.chosen).length;
+  set('pReview', `${reviewed.length} candidates, ${refused} refused, each with its note`);
+
+  list.innerHTML = '';
+  reviewed
+    .slice()
+    .sort((a, b) => (b.review.chosen ? 1 : 0) - (a.review.chosen ? 1 : 0))
+    .forEach(s => {
+      const r = s.review;
+      const row = document.createElement('div');
+      row.className = 'invrow ' + (r.chosen ? 'kept' : 'lost');
+      const body = document.createElement('div');
+
+      const tag = document.createElement('div');
+      tag.className = 'tag';
+      tag.textContent = `Candidate ${(r.candidate ?? 0) + 1} · ${r.decision}`;
+      body.appendChild(tag);
+
+      if (r.reason) {
+        const why = document.createElement('div');
+        why.className = 'why'; why.textContent = r.reason;
+        body.appendChild(why);
+      }
+      if (r.reason_source) {
+        const src = document.createElement('div');
+        src.className = 'facts'; src.textContent = r.reason_source;
+        body.appendChild(src);
+      }
+      row.appendChild(body);
+      list.appendChild(row);
+    });
+}
 
 const VISIBLE_LABELS = {
   title: 'Title', description: 'Subject', author: 'Authors',
@@ -982,6 +1044,11 @@ function renderInventory() {
       const why = document.createElement('div');
       why.className = 'why'; why.textContent = c.reason;
       body.appendChild(why);
+    }
+    if (c.reason_source) {
+      const src = document.createElement('div');
+      src.className = 'facts'; src.textContent = c.reason_source + ', sealed into the record';
+      body.appendChild(src);
     }
 
     const facts = document.createElement('div');

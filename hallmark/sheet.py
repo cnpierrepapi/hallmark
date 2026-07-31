@@ -78,14 +78,47 @@ def _rows(assets: list[dict[str, Any]], base: str) -> str:
             if asset.get("measured")
             else ""
         )
+        # The decision and the note behind it. Both are inside the canonical
+        # hash, so a reader can check them the same way they check the pixels,
+        # and the sheet says who worded the note rather than letting a machine
+        # written sentence pass as something a person typed.
+        decision = asset.get("decision") or ""
+        review = f'<strong>{escape(decision)}</strong>' if decision else "&mdash;"
+        if asset.get("reason"):
+            review += f'<br>{escape(asset["reason"])}'
+        if asset.get("reason_source"):
+            review += f'<br><span class="hash">{escape(asset["reason_source"])}</span>'
+
         out.append(
             f"""<tr>
   <td><strong>{escape(asset['title'])}</strong><br>
       <span class="hash">{escape(asset['media_type'])} &middot; {size}</span></td>
   <td>{escape(asset['model'])}</td>
+  <td>{review}</td>
   <td>{marks or '<span class="mark absent">none recorded</span>'}{when}</td>
   <td class="hash">{escape(asset['sha256'])}<br>
       <a href="{check}">{label}</a></td>
+</tr>"""
+        )
+    return "\n".join(out)
+
+
+def _rejects(rows: list[dict[str, Any]]) -> str:
+    """The refused attempts, listed rather than counted."""
+    out = []
+    for row in rows:
+        failed = ", ".join(row.get("failed_checks") or [])
+        detail = f'<br><span class="hash">failed: {escape(failed)}</span>' if failed else ""
+        size = f"{row['size_bytes'] / 1024:,.0f} KB" if row.get("size_bytes") else ""
+        score = "" if row.get("score") is None else f"{row['score']}"
+        out.append(
+            f"""<tr>
+  <td>{escape(str(row.get('modality', '')))}<br>
+      <span class="hash">{escape(str(row.get('model', '')))}</span></td>
+  <td>{escape(str(row.get('reason', '')))}{detail}</td>
+  <td>{escape(score)}</td>
+  <td class="hash">{escape(str(row.get('sha256', '')))[:32]}<br>
+      <span class="hash">{size}</span></td>
 </tr>"""
         )
     return "\n".join(out)
@@ -129,6 +162,39 @@ def render(record: dict[str, Any], base: str = "", *, standalone: bool = False) 
     )
 
     session_scope = record.get("scope") == "session"
+
+    # The refused attempts. A session sheet already lists them in the asset
+    # table with their notes, so it gets the count and a pointer upward rather
+    # than the same rows printed twice.
+    refused = record.get("rejected") or []
+    reject_count = record.get("reject_count", len(refused))
+    refused_heading = f"Refused attempts ({reject_count})"
+    if reject_count == 0:
+        refused_lede = "Nothing was refused in this record."
+        refused_table = ""
+    elif refused:
+        refused_lede = (
+            "Generated, checked, and not approved. Kept in storage unsigned, because "
+            "nobody passed them. Each note is inside the same hash as the approval, "
+            "so it cannot be reworded after the fact without the record failing."
+        )
+        refused_table = f"""  <div class="scroll">
+  <table>
+    <thead><tr><th>Attempt</th><th>Why it was not used</th><th>Checks</th>
+    <th>Content hash</th></tr></thead>
+    <tbody>
+{_rejects(refused)}
+    </tbody>
+  </table>
+  </div>"""
+    else:
+        refused_lede = (
+            "Listed in the asset table above, each with the note filed against it. "
+            "They are kept in storage unsigned, because nobody approved them, and "
+            "every note is inside the same hash as the approval."
+        )
+        refused_table = ""
+
     heading = "Everything this browser has generated" if session_scope else "Campaign"
     runs_row = (
         f"    <dt>Runs</dt><dd>{record.get('run_count', 0)}</dd>\n"
@@ -161,12 +227,17 @@ def render(record: dict[str, Any], base: str = "", *, standalone: bool = False) 
   <h2>Assets</h2>
   <div class="scroll">
   <table>
-    <thead><tr><th>Asset</th><th>Model</th><th>Marks</th><th>Content hash (SHA-256)</th></tr></thead>
+    <thead><tr><th>Asset</th><th>Model</th><th>Review</th><th>Marks</th>
+    <th>Content hash (SHA-256)</th></tr></thead>
     <tbody>
 {_rows(record['assets'], base)}
     </tbody>
   </table>
   </div>
+
+  <h2>{escape(refused_heading)}</h2>
+  <p>{escape(refused_lede)}</p>
+{refused_table}
 
   <h2>Pipeline</h2>
   <div class="scroll">

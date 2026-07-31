@@ -58,6 +58,9 @@ LIMITS = [
     "and it does not certify compliance on anyone's behalf.",
     "Marks describe how a file was made. They cannot establish that what it shows is "
     "true, and nothing here has examined the content of any asset.",
+    "The judgement behind every refusal is the reviewer's. Where a note says it was "
+    "worded by a language model, the model was given the reviewer's stated reason and "
+    "the measured checks, and has never seen the asset it is writing about.",
     "Metadata is removed by most platforms when a file is uploaded. An asset that "
     "loses its marks downstream is still covered by the record it was published with, "
     "which is why the hashes below are the durable part.",
@@ -109,16 +112,54 @@ def asset_row(tile: dict[str, Any]) -> dict[str, Any]:
         # offered back to them, since they are the one holding the copy.
         "check": tile.get("check", ""),
         "check_label": tile.get("check_label", ""),
+        # What review decided about this file and why. An asset row that says
+        # "not selected" and stops there tells a reader the pipeline had a
+        # choice and hides the only part that explains it.
+        "decision": tile.get("decision", ""),
+        "reason": tile.get("reason", ""),
+        "reason_source": tile.get("reason_source", ""),
         "marks": [MARK_LABELS[k] for k in ("credential", "visible", "pointer") if marks.get(k)],
         "missing": [MARK_LABELS[k] for k in ("credential", "visible", "pointer")
                     if k in marks and not marks.get(k)],
     }
 
 
+def reject_rows(attempts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The attempts nobody approved, with the note filed against each.
+
+    A campaign's asset table lists what shipped, so on its own it reads as a
+    pipeline that never misses. The refused attempts are the half of the record
+    that shows the review was real, and the reason is the whole of their value:
+    a row saying only "not selected" is a count, not an audit trail.
+    """
+    rows = []
+    for attempt in attempts:
+        if attempt.get("accepted"):
+            continue
+        failed = [
+            check.get("name", "")
+            for check in attempt.get("checks") or []
+            if not check.get("passed")
+        ]
+        rows.append(
+            {
+                "modality": attempt.get("modality", ""),
+                "model": attempt.get("model", ""),
+                "reason": attempt.get("reject_reason") or "No note recorded.",
+                "score": attempt.get("score"),
+                "sha256": attempt.get("sha256") or "",
+                "size_bytes": attempt.get("size_bytes") or 0,
+                "failed_checks": failed,
+            }
+        )
+    return rows
+
+
 def build(showcase: dict[str, Any]) -> dict[str, Any]:
     """Assemble the record for one campaign from its published payload."""
     gallery = showcase.get("gallery") or []
     rows = [asset_row(t) for t in gallery]
+    refused = reject_rows(showcase.get("attempts") or [])
 
     counted: dict[str, int] = {}
     for key, label in MARK_LABELS.items():
@@ -136,6 +177,8 @@ def build(showcase: dict[str, Any]) -> dict[str, Any]:
         "assets": rows,
         "asset_count": len(rows),
         "marks_applied": counted,
+        "rejected": refused,
+        "reject_count": len(refused),
         "ledger": showcase.get("ledger") or [],
         "limits": LIMITS,
     }
@@ -197,6 +240,16 @@ def from_session(
                     "check": f"/api/demo/asset/{session.get('session_id')}/{name}?download=1",
                     "check_label": "download this file",
                     "marks": marks.get(key) or asset.get("marks") or {},
+                    "decision": "approved" if chosen else "not selected",
+                    "reason": (
+                        (run.get("selection") or {}).get("human_reason") or ""
+                        if chosen
+                        else asset.get("reason") or ""
+                    ),
+                    "reason_source": (
+                        "written by the reviewer" if chosen
+                        else asset.get("reason_source") or ""
+                    ),
                 }
             )
             row["measured"] = "read from the file just now" if fresh else (
@@ -240,6 +293,11 @@ def from_session(
         "assets": rows,
         "asset_count": len(rows),
         "marks_applied": counted,
+        # A session's refused attempts are rows in the asset table already,
+        # each carrying its own note, so repeating them below would be the same
+        # information twice. The count still heads the section.
+        "rejected": [],
+        "reject_count": sum(1 for row in rows if row.get("decision") == "not selected"),
         "ledger": [],
         "limits": LIMITS,
     }

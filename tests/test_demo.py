@@ -98,7 +98,9 @@ def fake_run(tmp_path: Path, monkeypatch):
 def _no_chat(monkeypatch):
     """Force the fallback notes, so the assertion is about our own wording."""
     monkeypatch.setattr(
-        demo, "_rationales", lambda s, p, r: demo._fallback_rationales(s, p, r)
+        demo,
+        "_rationales",
+        lambda s, p, r: (demo._fallback_rationales(s, p, r), demo.REASON_FROM_TEMPLATE),
     )
 
 
@@ -562,3 +564,117 @@ class TestStripVisible:
         _png(source, seed=5)
         data = source.read_bytes()
         assert metadata.strip_visible(data, "image/png") == data
+
+
+class TestTheRefusalsAreInTheRecord:
+    """The note on why a candidate lost is evidence, so it is hashed like one.
+
+    It used to be written after the manifest was sealed and kept in a mutable
+    JSON object beside it, which meant the approver was tamper evident and the
+    reason the other two were thrown out was not. Anyone who could reach the
+    bucket could rewrite the review and every signature would still pass.
+    """
+
+    def test_every_candidate_is_in_the_record_with_its_decision(
+        self, tmp_path: Path, monkeypatch, fake_run
+    ) -> None:
+        _no_chat(monkeypatch)
+        session, uploads = fake_run
+        demo.select_candidate("sess-1", 1, "the stance is stronger", tmp_path / "w",
+                              signer="Ama")
+
+        manifest = json.loads(uploads["manifest:sess-1/r1"].decode())
+        decisions = [step["metadata"] for step in manifest["run"]["steps"]]
+        assert len(decisions) == 3, "a record of the winner alone hides the review"
+
+        chosen = [d for d in decisions if d["chosen"]]
+        refused = [d for d in decisions if not d["chosen"]]
+        assert len(chosen) == 1 and len(refused) == 2
+        assert chosen[0]["decision"] == "approved"
+        assert all(d["decision"] == "not selected" for d in refused)
+        # The note itself, not just the fact of a refusal.
+        assert all(d["reason"] for d in refused)
+        assert all("stance is stronger" in d["reason"] for d in refused)
+
+    def test_the_record_says_who_worded_each_note(
+        self, tmp_path: Path, monkeypatch, fake_run
+    ) -> None:
+        """A machine written sentence must not read as one a person typed."""
+        _no_chat(monkeypatch)
+        session, uploads = fake_run
+        demo.select_candidate("sess-1", 0, "warmer light", tmp_path / "w", signer="Ama")
+
+        steps = json.loads(uploads["manifest:sess-1/r1"].decode())["run"]["steps"]
+        by_choice = {step["metadata"]["chosen"]: step["metadata"] for step in steps}
+        assert by_choice[True]["reason_source"] == "written by the reviewer"
+        assert by_choice[False]["reason_source"] == demo.REASON_FROM_TEMPLATE
+
+    def test_rewriting_why_a_candidate_lost_breaks_the_record(
+        self, tmp_path: Path, monkeypatch, fake_run
+    ) -> None:
+        """The claim the product makes about rejects, pinned.
+
+        Same shape as the approver test: change the review after the fact and
+        the canonical hash stops matching, so the signed asset fails.
+        """
+        from genblaze_core.models.manifest import parse_manifest
+
+        _no_chat(monkeypatch)
+        session, uploads = fake_run
+        demo.select_candidate("sess-1", 1, "the stance is stronger", tmp_path / "w",
+                              signer="Ama")
+
+        raw = uploads["manifest:sess-1/r1"].decode()
+        manifest = parse_manifest(json.loads(raw))
+        sealed = manifest.canonical_hash
+
+        # Control first. Without it this test would pass even if the hash were
+        # simply unstable across a round trip, which proves nothing about
+        # tampering.
+        assert parse_manifest(json.loads(raw)).compute_hash() == sealed
+
+        forged = json.loads(raw)
+        for step in forged["run"]["steps"]:
+            if not step["metadata"]["chosen"]:
+                step["metadata"]["reason"] = "the client asked us to drop it"
+                break
+
+        assert parse_manifest(forged).compute_hash() != sealed
+
+    def test_the_checker_hands_back_the_review(
+        self, tmp_path: Path, monkeypatch, fake_run
+    ) -> None:
+        """Present in the record is not the same as reachable by a reader.
+
+        The decisions sat in the manifest for a fortnight while the verify API
+        dropped step metadata on the way out, so a stranger holding the file
+        saw three identical generate steps and no review at all.
+        """
+        from hallmark import verify as verify_mod
+
+        _no_chat(monkeypatch)
+        session, uploads = fake_run
+        demo.select_candidate("sess-1", 2, "the crop is tighter", tmp_path / "w",
+                              signer="Ama")
+
+        manifest_json = uploads["manifest:sess-1/r1"].decode()
+        monkeypatch.setattr(
+            verify_mod,
+            "_fetch_manifest",
+            lambda uri: __import__(
+                "genblaze_core.models.manifest", fromlist=["parse_manifest"]
+            ).parse_manifest(json.loads(manifest_json)),
+        )
+
+        delivered = tmp_path / "delivered.jpg"
+        delivered.write_bytes(uploads[demo.asset_key("sess-1", 1, 2, True, ".jpg")])
+        result = verify_mod.verify(delivered)
+
+        assert result.verdict == verify_mod.VERIFIED
+        reviews = [step.review for step in result.steps]
+        assert len(reviews) == 3
+        assert sum(1 for r in reviews if r["chosen"]) == 1
+        refused = [r for r in reviews if not r["chosen"]]
+        assert all(r["decision"] == "not selected" and r["reason"] for r in refused)
+        # The prompt is still the thing that stays back.
+        assert all(step.prompt_withheld for step in result.steps)

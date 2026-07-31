@@ -59,6 +59,11 @@ class ProvenanceStep:
     prompt_withheld: bool
     seed: int | None
     params: dict[str, Any]
+    # What happened to this candidate at review: whether it was the one that
+    # shipped, and if not, the note filed against it. Held on the step rather
+    # than beside the record so it falls inside the canonical hash with
+    # everything else. A run with one step leaves this empty.
+    review: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -107,6 +112,7 @@ class VerificationResult:
                     "prompt_withheld": step.prompt_withheld,
                     "seed": step.seed,
                     "params": step.params,
+                    "review": step.review,
                 }
                 for step in self.steps
             ],
@@ -199,6 +205,20 @@ def _matching_hash(computed: str, declared: list[str]) -> str | None:
     return None
 
 
+REVIEW_KEYS = ("candidate", "chosen", "decision", "reason", "reason_source")
+
+
+def _review_of(step: Any) -> dict[str, Any]:
+    """The review outcome recorded against one candidate.
+
+    Only the known keys are surfaced. Step metadata is ours to write, but it is
+    also the place anything incidental would end up, and a verifier should be
+    shown the decision rather than whatever the pipeline happened to stash.
+    """
+    meta = step.metadata or {}
+    return {key: meta[key] for key in REVIEW_KEYS if key in meta}
+
+
 def _steps_from(manifest: Manifest) -> list[ProvenanceStep]:
     steps = []
     for step in manifest.run.steps:
@@ -213,6 +233,7 @@ def _steps_from(manifest: Manifest) -> list[ProvenanceStep]:
                 prompt_withheld=withheld,
                 seed=step.seed,
                 params=step.params or {},
+                review=_review_of(step),
             )
         )
     return steps

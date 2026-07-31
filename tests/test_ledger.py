@@ -123,7 +123,9 @@ class TestTheDemoRecordsWhatItGenerated:
         recorded: list[list[dict]] = []
         monkeypatch.setattr(demo.attempts, "record", lambda rows: recorded.append(rows))
         monkeypatch.setattr(
-            demo, "_rationales", lambda s, p, r: demo._fallback_rationales(s, p, r)
+            demo,
+            "_rationales",
+            lambda s, p, r: (demo._fallback_rationales(s, p, r), demo.REASON_FROM_TEMPLATE),
         )
 
         demo.select_candidate("sess-1", 1, "the light is better", tmp_path / "w",
